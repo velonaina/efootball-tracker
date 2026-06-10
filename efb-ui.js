@@ -1141,13 +1141,57 @@ function loadLineupFromStorage() {
   } catch(e) {}
 }
 
+function loadSquad23IntoLineup() {
+  loadSquad23();
+  // Les 12 premiers vont en titulaires (par défaut), le reste en remplaçants
+  // L'utilisateur peut les déplacer dans le modal
+  // On respecte la composition sauvegardée si elle existe
+  var saved = null;
+  try {
+    var s = localStorage.getItem(LINEUP_STORAGE_KEY);
+    if (s) saved = JSON.parse(s);
+  } catch(e) {}
+
+  if (saved && saved.titulaires && saved.titulaires.length > 0) {
+    // Utiliser la dernière composition connue
+    var allPids = State.players.map(function(p) { return p.id; });
+    var allCids = Object.values(State.cards).flat().map(function(c) { return c.id; });
+    _matchTitulaires = (saved.titulaires || []).filter(function(s) {
+      return allPids.includes(s.player_id) && allCids.includes(s.card_id);
+    });
+    _matchRemplacants = (saved.remplacants || []).filter(function(s) {
+      return allPids.includes(s.player_id) && allCids.includes(s.card_id);
+    });
+    // Mettre à jour les build_id depuis Squad 23
+    _matchTitulaires = _matchTitulaires.map(function(sel) {
+      var sq = _squad23.find(function(s) { return s.player_id === sel.player_id; });
+      return { player_id: sel.player_id, card_id: sel.card_id, build_id: sq ? sq.build_id : null };
+    });
+    _matchRemplacants = _matchRemplacants.map(function(sel) {
+      var sq = _squad23.find(function(s) { return s.player_id === sel.player_id; });
+      return { player_id: sel.player_id, card_id: sel.card_id, build_id: sq ? sq.build_id : null };
+    });
+  } else if (_squad23.length > 0) {
+    // Première fois — répartir depuis Squad 23
+    _matchTitulaires = _squad23.slice(0, 11).map(function(s) {
+      return { player_id: s.player_id, card_id: s.card_id, build_id: s.build_id };
+    });
+    _matchRemplacants = _squad23.slice(11).map(function(s) {
+      return { player_id: s.player_id, card_id: s.card_id, build_id: s.build_id };
+    });
+  } else {
+    _matchTitulaires = [];
+    _matchRemplacants = [];
+  }
+}
+
 function renderModalAddMatch(buildId) {
   const allBuilds = Object.values(State.builds).flat();
   const allPlayers = State.players;
   _matchPlayerStats = {};
   _matchSubs = [];
-  // Charger la dernière composition sauvegardée
-  loadLineupFromStorage();
+  // Charger la Squad 23 dans titulaires/remplaçants
+  loadSquad23IntoLineup();
   // Auto-init stats + instructions
   initMatchPlayerStatsFromLineup();
   setTimeout(applyLastInstructions, 80);
@@ -1191,19 +1235,6 @@ function renderModalAddMatch(buildId) {
             <label>Rang</label>
             <select id="m-match-rank" class="form-input">
               ${EFB_RANKS.map(r => `<option value="${r}">${r}</option>`).join('')}
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Build utilisé</label>
-            <select id="m-match-build" class="form-input">
-              <option value="">— Sélectionner —</option>
-              ${allBuilds.map(b => {
-                // Trouver le nom du joueur via card_id
-                const card = Object.values(State.cards).flat().find(c => c.id === b.card_id);
-                const player = card ? State.players.find(p => p.id === card.player_id) : null;
-                const label = (player ? player.name + ' — ' : '') + (b.name || 'Build sans nom');
-                return `<option value="${b.id}" ${b.id === buildId ? 'selected' : ''}>${label}</option>`;
-              }).join('')}
             </select>
           </div>
         </div>
@@ -1848,19 +1879,26 @@ async function saveMatch() {
   if (!result) { alert('Sélectionne un résultat'); return; }
   saveLastInstructions();
 
-  // Construire player_stats depuis _matchPlayerStats
-  const playerStats = Object.entries(_matchPlayerStats).map(([pid, stats]) => ({
-    player_id: pid,
-    goals: stats.goals || 0,
-    assists: stats.assists || 0,
-    saves: stats.saves || 0,
-    yellow_card: stats.yellow_card || false,
-    red_card: stats.red_card || false,
-    rating: stats.rating || 0,
-  }));
+  // Construire player_stats depuis _matchPlayerStats — avec build_id par joueur
+  const allLineup = _matchTitulaires.concat(_matchRemplacants);
+  const playerStats = Object.entries(_matchPlayerStats).map(([pid, stats]) => {
+    const lineupEntry = allLineup.find(s => s.player_id === pid);
+    const squad23Entry = _squad23.find(s => s.player_id === pid);
+    const buildId_player = (lineupEntry && lineupEntry.build_id) || (squad23Entry && squad23Entry.build_id) || null;
+    return {
+      player_id: pid,
+      build_id: buildId_player,
+      goals: stats.goals || 0,
+      assists: stats.assists || 0,
+      saves: stats.saves || 0,
+      yellow_card: stats.yellow_card || false,
+      red_card: stats.red_card || false,
+      rating: stats.rating || 0,
+    };
+  });
 
   const data = {
-    build_id: buildId || null,
+    build_id: null, // Retiré — build_id est maintenant par joueur dans player_stats
     result,
     match_date: document.getElementById('m-match-date')?.value || null,
     match_time: document.getElementById('m-match-time')?.value || null,
