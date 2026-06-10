@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>⚽ Live Match</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f1a;color:#f0f0f0;min-height:100vh;max-width:430px;margin:0 auto;font-size:14px}
+:root{
+  --purple:#7c5cbf;--purple-light:#a07fe0;--gold:#f0b429;
+  --green:#2ecc71;--amber:#f0a500;--red:#e74c3c;
+  --bg:#0f0f1a;--bg2:#1a1a2e;--bg3:#16213e;--card:#1e1e35;
+  --border:#2a2a45;--text:#f0f0f0;--muted:#8888aa
+}
+.screen{display:none;min-height:100vh;padding-bottom:20px}
+.screen.active{display:block}
+.topbar{background:var(--bg2);border-bottom:1px solid var(--border);padding:10px 14px;display:flex;align-items:center;justify-content:space-between}
+.topbar h1{font-size:15px;font-weight:700}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px}
+.ig{margin-bottom:8px}
+.ig label{font-size:11px;color:var(--muted);display:block;margin-bottom:3px}
+.ig input,.ig select{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:#f0f0f0;font-size:14px;outline:none}
+.ig input:focus,.ig select:focus{border-color:var(--purple)}
+select option{background:var(--bg2)}
+.btn{padding:10px 14px;border-radius:10px;border:none;font-size:13px;font-weight:600;cursor:pointer;width:100%}
+.btn:active{opacity:.8}
+.btn-primary{background:var(--purple);color:#fff}
+.btn-secondary{background:var(--bg3);color:var(--text);border:1px solid var(--border)}
+.btn-success{background:#1a3d2b;color:var(--green);border:1px solid var(--green)}
+.btn-danger{background:#3d1a1a;color:var(--red);border:1px solid var(--red)}
+.score-bar{background:var(--bg2);border-bottom:1px solid var(--border);padding:8px 14px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+.score-num{font-size:28px;font-weight:700;color:var(--gold);min-width:36px;text-align:center}
+.score-btn{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);color:var(--text);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.live-row{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin-bottom:6px}
+.live-row.subbed{opacity:.5;border-style:dashed}
+.player-name{font-size:13px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.pos-badge{font-size:10px;background:var(--bg3);color:var(--muted);padding:1px 6px;border-radius:8px}
+.card-badge{font-size:10px;padding:1px 6px;border-radius:8px;font-weight:600}
+.stat-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.stat-group{display:flex;align-items:center;gap:4px;background:var(--bg3);border-radius:8px;padding:3px 6px}
+.stat-label{font-size:10px;color:var(--muted)}
+.stat-val{font-size:14px;font-weight:700;min-width:16px;text-align:center}
+.stat-btn{width:26px;height:26px;border-radius:6px;border:none;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-weight:700}
+.btn-plus{background:#1a3d2b;color:var(--green)}
+.btn-minus{background:#3d1a1a;color:var(--red)}
+.card-btn{width:32px;height:32px;border-radius:8px;border:1px solid var(--border);background:var(--bg3);font-size:14px;cursor:pointer}
+.card-btn.yellow{background:#3d2e0a;border-color:var(--amber)}
+.card-btn.red{background:#3d1a1a;border-color:var(--red)}
+.post-row{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px}
+.rating-btns{display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}
+.rating-btn{width:36px;height:32px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--muted);font-size:12px;font-weight:600;cursor:pointer}
+.rating-btn.active{background:var(--purple);color:#fff;border-color:var(--purple)}
+.sec{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin:12px 14px 6px}
+.empty{text-align:center;padding:30px;color:var(--muted);font-size:13px}
+.badge{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px}
+.badge-green{background:#1a3d2b;color:var(--green)}
+.badge-amber{background:#3d2e0a;color:var(--amber)}
+.badge-red{background:#3d1a1a;color:var(--red)}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:200;display:none;align-items:flex-end;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--bg2);border-radius:14px 14px 0 0;padding:16px;width:100%;max-width:430px;max-height:80vh;overflow-y:auto}
+.modal-title{font-size:14px;font-weight:700;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.close-btn{background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ ÉCRAN 1 : PRÉPARATION ═══════════════════ -->
+<div class="screen active" id="screen-prep">
+  <div class="topbar">
+    <h1>⚽ Nouveau match</h1>
+    <span id="sync-status" style="font-size:10px;color:var(--muted)">Chargement...</span>
+  </div>
+  <div style="padding:10px 14px">
+    <div class="card">
+      <div class="ig"><label>Adversaire</label><input type="text" id="p-opp" placeholder="ex: FC Barcelona"></div>
+      <div class="grid2">
+        <div class="ig"><label>🏆 Type de match</label>
+          <select id="p-match-type" onchange="toggleLevel(this.value)">
+            <option value="ligue_jcj_d1">🏆 Ligue JCJ D1</option>
+            <option value="ligue_jcj_d2">🏆 Ligue JCJ D2</option>
+            <option value="ligue_jcj_d3">🏆 Ligue JCJ D3</option>
+            <option value="ligue_ia_d1">🤖 Ligue IA D1</option>
+            <option value="ligue_ia_d2">🤖 Ligue IA D2</option>
+            <option value="ligue_ia_d3">🤖 Ligue IA D3</option>
+            <option value="event_jcj">🎯 Évènement JCJ</option>
+            <option value="event_ia">🎯 Évènement IA</option>
+            <option value="amical">🤝 Amical</option>
+            <option value="my_league">⚽ My League</option>
+          </select>
+        </div>
+        <div id="level-block">
+          <div class="ig"><label>🎯 Niveau</label>
+            <select id="p-level">
+              <option value="Professionnel">🥈 Professionnel</option>
+              <option value="Superstar">🥇 Superstar</option>
+              <option value="Légende">🏆 Légende</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="ig"><label>Notre formation</label><input type="text" id="p-formation" placeholder="ex: 4-3-3"></div>
+        <div class="ig"><label>Formation adverse</label><input type="text" id="p-opp-formation" placeholder="ex: 4-4-2"></div>
+      </div>
+      <div class="grid2">
+        <div class="ig"><label>📊 Mon rang</label><input type="number" id="p-my-rank" placeholder="ex: 1250" style="text-align:center"></div>
+        <div class="ig"><label>📊 Rang adverse</label><input type="number" id="p-opp-rank" placeholder="ex: 1380" style="text-align:center"></div>
+      </div>
+      <div class="grid2">
+        <div class="ig"><label>💪 Ma force</label><input type="number" id="p-my-strength" placeholder="ex: 2920" style="text-align:center"></div>
+        <div class="ig"><label>💪 Force adverse</label><input type="number" id="p-opp-strength" placeholder="ex: 2850" style="text-align:center"></div>
+      </div>
+      <div class="grid2">
+        <div class="ig"><label>Date</label><input type="date" id="p-date"></div>
+        <div class="ig"><label>Heure</label><input type="time" id="p-time"></div>
+      </div>
+      <!-- Build utilisé -->
+      <div class="ig"><label>🎮 Build utilisé</label>
+        <select id="p-build">
+          <option value="">— Sélectionner un build —</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Instructions individuelles -->
+    <p class="sec">📋 Instructions individuelles</p>
+    <div class="card">
+      <div class="grid2">
+        <div class="ig"><label>Attack 1</label>
+          <select id="p-atk1-instr">
+            <option value="Off">Off</option>
+            <option value="Defensive">Defensive</option>
+            <option value="Attacking">Attacking</option>
+            <option value="Anchoring">Anchoring</option>
+          </select>
+          <select id="p-atk1-target" style="margin-top:4px">
+            <option value="">Targeted Player</option>
+          </select>
+        </div>
+        <div class="ig"><label>Attack 2</label>
+          <select id="p-atk2-instr">
+            <option value="Off">Off</option>
+            <option value="Defensive">Defensive</option>
+            <option value="Attacking">Attacking</option>
+            <option value="Anchoring">Anchoring</option>
+          </select>
+          <select id="p-atk2-target" style="margin-top:4px">
+            <option value="">Targeted Player</option>
+          </select>
+        </div>
+        <div class="ig"><label>Defence 1</label>
+          <select id="p-def1-instr">
+            <option value="Off">Off</option>
+            <option value="Tight Marking">Tight Marking</option>
+            <option value="Man Marking">Man Marking</option>
+            <option value="Counter Target">Counter Target</option>
+            <option value="Deep Line">Deep Line</option>
+          </select>
+          <select id="p-def1-target" style="margin-top:4px">
+            <option value="">Targeted Player</option>
+          </select>
+        </div>
+        <div class="ig"><label>Defence 2</label>
+          <select id="p-def2-instr">
+            <option value="Off">Off</option>
+            <option value="Tight Marking">Tight Marking</option>
+            <option value="Man Marking">Man Marking</option>
+            <option value="Counter Target">Counter Target</option>
+            <option value="Deep Line">Deep Line</option>
+          </select>
+          <select id="p-def2-target" style="margin-top:4px">
+            <option value="">Targeted Player</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <p class="sec">🟢 Titulaires (11)</p>
+    <div id="titulaires-list"></div>
+
+    <p class="sec">🔄 Remplaçants</p>
+    <div id="remplacants-list"></div>
+
+    <div style="margin-top:12px">
+      <button class="btn btn-primary" onclick="startMatch()">▶ Lancer le match</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ ÉCRAN 2 : LIVE ═══════════════════ -->
+<div class="screen" id="screen-live">
+  <div class="score-bar">
+    <div style="flex:1">
+      <div style="font-size:10px;color:var(--muted)" id="live-opp-name">vs Adversaire</div>
+      <div style="font-size:11px;color:var(--muted)" id="live-level"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <button class="score-btn" onclick="changeScore('us',-1)">−</button>
+      <div class="score-num" id="score-us">0</div>
+      <span style="color:var(--muted);font-weight:700">-</span>
+      <div class="score-num" id="score-them">0</div>
+      <button class="score-btn" onclick="changeScore('them',-1)">−</button>
+    </div>
+    <div style="display:flex;gap:4px;margin-left:8px">
+      <button class="score-btn" onclick="changeScore('us',1)" style="background:#1a3d2b;border-color:var(--green);color:var(--green)">+</button>
+      <button class="score-btn" onclick="changeScore('them',1)" style="background:#3d1a1a;border-color:var(--red);color:var(--red)">+</button>
+    </div>
+  </div>
+
+  <div style="padding:8px 10px">
+    <p class="sec" style="margin:6px 0">🟢 Sur le terrain</p>
+    <div id="live-titulaires"></div>
+    <div class="grid2" style="margin:10px 0">
+      <button class="btn btn-secondary" onclick="openModal('modal-sub')">🔄 Remplacement</button>
+      <button class="btn btn-success" onclick="endMatch()">✅ Fin du match</button>
+    </div>
+    <p class="sec" style="margin:6px 0">🔄 Remplaçants</p>
+    <div id="live-remplacants"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════ ÉCRAN 3 : POST-MATCH ═══════════════════ -->
+<div class="screen" id="screen-post">
+  <div class="topbar">
+    <h1>📝 Notes finales</h1>
+    <span id="post-result" style="font-size:13px;font-weight:700"></span>
+  </div>
+  <div style="padding:10px 14px">
+    <div class="card" style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div id="post-summary" style="font-size:13px"></div>
+        <div id="post-score" style="font-size:24px;font-weight:700;color:var(--gold)"></div>
+      </div>
+    </div>
+    <p class="sec" style="margin:0 0 6px">Note /10 + stats par joueur</p>
+    <div id="post-players"></div>
+    <!-- Homme du match -->
+    <div class="ig" style="margin-top:8px">
+      <label>🏅 Homme du match</label>
+      <select id="p-motm"><option value="">— Sélectionner —</option></select>
+    </div>
+    <div class="grid2" style="margin-top:4px">
+      <div class="ig">
+        <label>📝 Note globale (1-5)</label>
+        <select id="p-match-note">
+          <option value="3">3 — Moyen</option>
+          <option value="1">1 — Très mauvais</option>
+          <option value="2">2 — Mauvais</option>
+          <option value="4">4 — Bon</option>
+          <option value="5">5 — Excellent</option>
+        </select>
+      </div>
+      <div class="ig">
+        <label>🔁 Adversaire répétitif</label>
+        <select id="p-repeated">
+          <option value="false">Non</option>
+          <option value="true">Oui</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-primary" style="margin-top:10px" onclick="saveMatchFinal()">💾 Enregistrer le match</button>
+  </div>
+</div>
+
+<!-- ═══════════════════ MODAL REMPLACEMENT ═══════════════════ -->
+<div class="modal-overlay" id="modal-sub">
+  <div class="modal">
+    <div class="modal-title">🔄 Remplacement <button class="close-btn" onclick="closeModal('modal-sub')">✕</button></div>
+    <div class="ig"><label>Qui sort ?</label><select id="sub-out"></select></div>
+    <div class="ig"><label>Qui entre ?</label><select id="sub-in"></select></div>
+    <div class="ig"><label>Minute</label><input type="number" id="sub-min" min="1" max="120" placeholder="ex: 60" style="text-align:center"></div>
+    <button class="btn btn-primary" onclick="confirmSub()">✅ Confirmer</button>
+  </div>
+</div>
+
+<script>
+var SB_URL = 'https://hxrepxhtxksrxtjskkon.supabase.co';
+var SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4cmVweGh0eGtzcnh0anNra29uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5MzA5MjAsImV4cCI6MjA5NjUwNjkyMH0.rIzono7x1-Uhm90X3m1fUbyBDZ7JWX_BWBWooFoRheo';
+var COLORS = ['#7c5cbf','#f0b429','#2ecc71','#e74c3c','#3498db','#e67e22','#9b59b6','#1abc9c','#e91e63','#00bcd4'];
+var LEVEL_TYPES = ['ligue_jcj_d1','ligue_jcj_d2','ligue_jcj_d3','ligue_ia_d1','ligue_ia_d2','ligue_ia_d3'];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+var S = { players: [], cards: [], builds: [] };
+var match = {
+  opp: '', matchType: '', matchLevel: '', formation: '', oppFormation: '',
+  myRank: null, oppRank: null, myStrength: null, oppStrength: null,
+  date: '', time: '', buildId: null,
+  attack1_instruction: 'Off', attack1_target: null,
+  attack2_instruction: 'Off', attack2_target: null,
+  defence1_instruction: 'Off', defence1_target: null,
+  defence2_instruction: 'Off', defence2_target: null,
+  us: 0, them: 0,
+  titulaires: [],    // [{player_id, card_id}]
+  remplacants: [],   // [{player_id, card_id}]
+  subs: [],          // [{out_player_id, in_player_id, minute}]
+  events: {}         // {player_id: {goals, assists, saves, yellow_card, red_card, statut, entry_minute, minutes_played}}
+};
+var ratings = {};   // {player_id: note/10}
+
+// ── Supabase ──────────────────────────────────────────────────────────────────
+function sbFetch(path, options) {
+  options = options || {};
+  return fetch(SB_URL + '/rest/v1/' + path, {
+    method: options.method || 'GET',
+    headers: Object.assign({
+      'apikey': SB_KEY,
+      'Authorization': 'Bearer ' + SB_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': options.prefer || 'return=representation'
+    }, options.headers || {}),
+    body: options.body ? JSON.stringify(options.body) : undefined
+  }).then(function(r) {
+    if (!r.ok) return r.json().then(function(e) { throw new Error(e.message); });
+    if (r.status === 204 || options.prefer === 'return=minimal') return null;
+    var ct = r.headers.get('content-type') || '';
+    return ct.includes('json') ? r.json() : null;
+  });
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function initials(n) { return n.split(' ').map(function(w) { return w[0]; }).join('').toUpperCase().slice(0, 2); }
+function efhubImg(url) {
+  if (!url) return null;
+  var m = url.match(/efhub\.com\/players\/(\d+)/);
+  return m ? 'https://efimg.com/efootballhub22/images/player_cards/' + m[1] + '_l.png' : null;
+}
+function pcolor(id) { var i = S.players.findIndex(function(p) { return p.id === id; }); return COLORS[i < 0 ? 0 : i % COLORS.length]; }
+function getPlayer(id) { return S.players.find(function(p) { return p.id === id; }); }
+function getCard(id) { return S.cards.find(function(c) { return c.id === id; }); }
+function pcards(pid) { return S.cards.filter(function(c) { return c.player_id === pid; }); }
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function go(id) {
+  document.querySelectorAll('.screen').forEach(function(s) { s.classList.remove('active'); });
+  document.getElementById(id).classList.add('active');
+}
+
+function playerAvatar(pid, size, fontSize) {
+  size = size || 36; fontSize = fontSize || 12;
+  var p = getPlayer(pid); if (!p) return '';
+  var img = efhubImg(p.efhub_url);
+  if (img) {
+    var h = Math.round(size * 1.35);
+    return '<div style="width:' + size + 'px;height:' + h + 'px;border-radius:6px;overflow:hidden;flex-shrink:0;background:#16213e">' +
+      '<img src="' + img + '" style="width:100%;height:100%;object-fit:cover;object-position:center top">' +
+      '</div>';
+  }
+  return '<div style="width:' + size + 'px;height:' + size + 'px;border-radius:50%;background:' + pcolor(pid) + '22;color:' + pcolor(pid) + ';display:flex;align-items:center;justify-content:center;font-size:' + fontSize + 'px;font-weight:600;flex-shrink:0">' + initials(p.name) + '</div>';
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  var now = new Date();
+  document.getElementById('p-date').value = now.toISOString().split('T')[0];
+  document.getElementById('p-time').value = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+  loadData();
+});
+
+function loadData() {
+  document.getElementById('sync-status').textContent = 'Chargement...';
+  Promise.all([
+    sbFetch('efb_players?select=*&order=name.asc'),
+    sbFetch('efb_cards?select=*&order=created_at.asc'),
+    sbFetch('efb_builds?select=*,efb_cards(efb_players(name))&order=name.asc'),
+  ]).then(function(res) {
+    S.players = res[0] || [];
+    S.cards = res[1] || [];
+    S.builds = res[2] || [];
+    document.getElementById('sync-status').textContent = '✅ ' + S.players.length + ' joueurs';
+    renderPrepLists();
+    renderBuildSelect();
+    renderPlayerTargets();
+  }).catch(function(e) {
+    document.getElementById('sync-status').textContent = '⚠️ Hors ligne';
+    console.error(e);
+  });
+}
+
+function renderBuildSelect() {
+  var sel = document.getElementById('p-build');
+  sel.innerHTML = '<option value="">— Sélectionner un build —</option>';
+  S.builds.forEach(function(b) {
+    var playerName = b.efb_cards?.efb_players?.name || '?';
+    sel.innerHTML += '<option value="' + b.id + '">' + b.name + ' (' + playerName + ')</option>';
+  });
+}
+
+function renderPlayerTargets() {
+  ['p-atk1-target','p-atk2-target','p-def1-target','p-def2-target'].forEach(function(id) {
+    var sel = document.getElementById(id);
+    sel.innerHTML = '<option value="">Targeted Player</option>';
+    S.players.forEach(function(p) {
+      sel.innerHTML += '<option value="' + p.id + '">' + p.name + '</option>';
+    });
+  });
+}
+
+function toggleLevel(val) {
+  var show = LEVEL_TYPES.indexOf(val) >= 0;
+  document.getElementById('level-block').style.display = show ? 'block' : 'none';
+}
+
+// ── Préparation ───────────────────────────────────────────────────────────────
+var selectedTitu = [];
+var selectedRempl = [];
+
+function renderPrepLists() {
+  renderPrepGroup('titulaires-list', selectedTitu, 11, true);
+  renderPrepGroup('remplacants-list', selectedRempl, 12, false);
+}
+
+function renderPrepGroup(elId, selected, max, isTitu) {
+  var el = document.getElementById(elId);
+  var otherPids = (isTitu ? selectedRempl : selectedTitu).map(function(x) { return x.player_id; });
+  var html = selected.map(function(sel, i) {
+    var p = getPlayer(sel.player_id);
+    var c = getCard(sel.card_id);
+    if (!p || !c) return '';
+    return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+      playerAvatar(p.id, 32, 11) +
+      '<div style="flex:1">' +
+        '<div style="font-size:13px;font-weight:600">' + p.name + '</div>' +
+        '<span style="font-size:10px;color:var(--muted)">' + (c.card_type || '') + ' · ' + (c.efhub_stats?.position || '') + '</span>' +
+      '</div>' +
+      '<button onclick="removeFromGroup(' + i + ',' + (isTitu ? 1 : 0) + ')" style="background:none;border:none;color:var(--red);font-size:18px;cursor:pointer">✕</button>' +
+    '</div>';
+  }).join('');
+
+  var available = S.players.filter(function(p) {
+    return !selected.some(function(s) { return s.player_id === p.id; }) &&
+           otherPids.indexOf(p.id) < 0 &&
+           pcards(p.id).length > 0;
+  });
+
+  if (selected.length < max && available.length) {
+    html += '<div class="ig"><select onchange="addToGroup(this,' + (isTitu ? 1 : 0) + ')">' +
+      '<option value="">+ Ajouter un joueur...</option>' +
+      available.map(function(p) {
+        return pcards(p.id).map(function(c) {
+          return '<option value="' + p.id + '|' + c.id + '">' + p.name + ' — ' + (c.card_type || '') + ' ' + (c.efhub_stats?.position || '') + '</option>';
+        }).join('');
+      }).join('') +
+    '</select></div>';
+  }
+
+  if (selected.length === 0) html = '<div class="empty" style="padding:16px">Aucun joueur sélectionné</div>' + html;
+  var count = selected.length + (isTitu ? '/11' : '');
+  el.innerHTML = '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">' + count + ' sélectionné' + (selected.length > 1 ? 's' : '') + '</div>' + html;
+}
+
+function addToGroup(sel, isTitu) {
+  var val = sel.value; if (!val) return;
+  var parts = val.split('|');
+  var arr = isTitu ? selectedTitu : selectedRempl;
+  arr.push({ player_id: parts[0], card_id: parts[1] });
+  sel.value = '';
+  renderPrepLists();
+}
+
+function removeFromGroup(idx, isTitu) {
+  var arr = isTitu ? selectedTitu : selectedRempl;
+  arr.splice(idx, 1);
+  renderPrepLists();
+}
+
+function startMatch() {
+  if (selectedTitu.length === 0) return alert('Sélectionne au moins un titulaire');
+  match.opp = document.getElementById('p-opp').value.trim() || 'Inconnu';
+  match.matchType = document.getElementById('p-match-type').value;
+  match.matchLevel = document.getElementById('p-level').value;
+  match.formation = document.getElementById('p-formation').value.trim();
+  match.oppFormation = document.getElementById('p-opp-formation').value.trim();
+  match.myRank = parseInt(document.getElementById('p-my-rank').value) || null;
+  match.oppRank = parseInt(document.getElementById('p-opp-rank').value) || null;
+  match.myStrength = parseInt(document.getElementById('p-my-strength').value) || null;
+  match.oppStrength = parseInt(document.getElementById('p-opp-strength').value) || null;
+  match.date = document.getElementById('p-date').value;
+  match.time = document.getElementById('p-time').value;
+  match.buildId = document.getElementById('p-build').value || null;
+  match.attack1_instruction = document.getElementById('p-atk1-instr').value;
+  match.attack1_target = document.getElementById('p-atk1-target').value || null;
+  match.attack2_instruction = document.getElementById('p-atk2-instr').value;
+  match.attack2_target = document.getElementById('p-atk2-target').value || null;
+  match.defence1_instruction = document.getElementById('p-def1-instr').value;
+  match.defence1_target = document.getElementById('p-def1-target').value || null;
+  match.defence2_instruction = document.getElementById('p-def2-instr').value;
+  match.defence2_target = document.getElementById('p-def2-target').value || null;
+  match.us = 0; match.them = 0;
+  match.titulaires = selectedTitu.slice();
+  match.remplacants = selectedRempl.slice();
+  match.subs = [];
+  match.events = {};
+
+  match.titulaires.forEach(function(sel) {
+    match.events[sel.player_id] = { goals: 0, assists: 0, saves: 0, yellow_card: false, red_card: false, statut: 'titulaire', entry_minute: null, minutes_played: 90 };
+  });
+  match.remplacants.forEach(function(sel) {
+    match.events[sel.player_id] = { goals: 0, assists: 0, saves: 0, yellow_card: false, red_card: false, statut: 'remplacant', entry_minute: null, minutes_played: 0 };
+  });
+
+  document.getElementById('live-opp-name').textContent = 'vs ' + match.opp;
+  document.getElementById('live-level').textContent = match.matchLevel || match.matchType;
+  updateScoreDisplay();
+  renderLive();
+  go('screen-live');
+}
+
+// ── Live ──────────────────────────────────────────────────────────────────────
+function changeScore(who, delta) {
+  if (who === 'us') match.us = Math.max(0, match.us + delta);
+  else match.them = Math.max(0, match.them + delta);
+  updateScoreDisplay();
+}
+
+function updateScoreDisplay() {
+  document.getElementById('score-us').textContent = match.us;
+  document.getElementById('score-them').textContent = match.them;
+}
+
+function activeTitu() {
+  var out = match.subs.map(function(s) { return s.out_player_id; });
+  return match.titulaires.filter(function(s) { return out.indexOf(s.player_id) < 0; });
+}
+
+function activeSubsIn() {
+  return match.subs.map(function(s) {
+    return match.remplacants.find(function(r) { return r.player_id === s.in_player_id; }) || null;
+  }).filter(Boolean);
+}
+
+function availableRempl() {
+  var inPids = match.subs.map(function(s) { return s.in_player_id; });
+  return match.remplacants.filter(function(s) { return inPids.indexOf(s.player_id) < 0; });
+}
+
+function renderLive() {
+  var onField = activeTitu().concat(activeSubsIn());
+  document.getElementById('live-titulaires').innerHTML = onField.map(function(sel) { return liveRow(sel, true); }).join('');
+  var bench = availableRempl();
+  document.getElementById('live-remplacants').innerHTML = bench.length
+    ? bench.map(function(sel) { return liveRow(sel, false); }).join('')
+    : '<div style="color:var(--muted);font-size:12px;padding:6px 0">Aucun remplaçant</div>';
+}
+
+function liveRow(sel, onField) {
+  var p = getPlayer(sel.player_id);
+  var c = getCard(sel.card_id);
+  if (!p || !c) return '';
+  var ev = match.events[sel.player_id] || { goals: 0, assists: 0, saves: 0, yellow_card: false, red_card: false };
+  var isGK = (c.efhub_stats?.position === 'GK');
+  var sub = match.subs.find(function(s) { return s.in_player_id === sel.player_id; });
+
+  return '<div class="live-row" id="lrow-' + sel.player_id + '">' +
+    '<div class="player-name">' +
+      playerAvatar(p.id, 28, 10) +
+      '<span>' + p.name + '</span>' +
+      '<span class="pos-badge">' + (c.efhub_stats?.position || '') + '</span>' +
+      '<span class="card-badge" style="background:' + pcolor(sel.player_id) + '22;color:' + pcolor(sel.player_id) + '">' + (c.card_type || '') + '</span>' +
+      (sub ? '<span class="badge badge-amber">🔄 ' + sub.minute + '\'</span>' : '') +
+      (ev.yellow_card ? '<span class="badge badge-amber">🟡</span>' : '') +
+      (ev.red_card ? '<span class="badge badge-red">🔴</span>' : '') +
+    '</div>' +
+    (onField ? '<div class="stat-row">' +
+      // Buts
+      '<div class="stat-group">' +
+        '<span class="stat-label">⚽</span>' +
+        '<button class="stat-btn btn-minus" onclick="updateStat(\'' + sel.player_id + '\',\'goals\',-1)">−</button>' +
+        '<span class="stat-val" id="g-' + sel.player_id + '">' + ev.goals + '</span>' +
+        '<button class="stat-btn btn-plus" onclick="updateStat(\'' + sel.player_id + '\',\'goals\',1)">+</button>' +
+      '</div>' +
+      // Passes
+      '<div class="stat-group">' +
+        '<span class="stat-label">🎯</span>' +
+        '<button class="stat-btn btn-minus" onclick="updateStat(\'' + sel.player_id + '\',\'assists\',-1)">−</button>' +
+        '<span class="stat-val" id="a-' + sel.player_id + '">' + ev.assists + '</span>' +
+        '<button class="stat-btn btn-plus" onclick="updateStat(\'' + sel.player_id + '\',\'assists\',1)">+</button>' +
+      '</div>' +
+      // Arrêts (GK seulement)
+      (isGK ? '<div class="stat-group">' +
+        '<span class="stat-label">🧤</span>' +
+        '<button class="stat-btn btn-minus" onclick="updateStat(\'' + sel.player_id + '\',\'saves\',-1)">−</button>' +
+        '<span class="stat-val" id="s-' + sel.player_id + '">' + ev.saves + '</span>' +
+        '<button class="stat-btn btn-plus" onclick="updateStat(\'' + sel.player_id + '\',\'saves\',1)">+</button>' +
+      '</div>' : '') +
+      // Cartons
+      '<button class="card-btn ' + (ev.yellow_card ? 'yellow' : '') + '" onclick="toggleCard(\'' + sel.player_id + '\',\'yellow\')">🟡</button>' +
+      '<button class="card-btn ' + (ev.red_card ? 'red' : '') + '" onclick="toggleCard(\'' + sel.player_id + '\',\'red\')">🔴</button>' +
+    '</div>' : '') +
+  '</div>';
+}
+
+function updateStat(pid, stat, delta) {
+  var ev = match.events[pid];
+  if (!ev) return;
+  ev[stat] = Math.max(0, (ev[stat] || 0) + delta);
+  var elId = stat === 'goals' ? 'g-' : stat === 'assists' ? 'a-' : 's-';
+  var el = document.getElementById(elId + pid);
+  if (el) el.textContent = ev[stat];
+}
+
+function toggleCard(pid, type) {
+  var ev = match.events[pid];
+  if (!ev) return;
+  if (type === 'yellow') ev.yellow_card = !ev.yellow_card;
+  if (type === 'red') ev.red_card = !ev.red_card;
+  renderLive();
+}
+
+// ── Remplacements ─────────────────────────────────────────────────────────────
+function openSubModal() {
+  var outSel = document.getElementById('sub-out');
+  var inSel = document.getElementById('sub-in');
+  outSel.innerHTML = activeTitu().concat(activeSubsIn()).map(function(sel) {
+    var p = getPlayer(sel.player_id);
+    return '<option value="' + sel.player_id + '">' + (p ? p.name : '?') + '</option>';
+  }).join('');
+  inSel.innerHTML = availableRempl().map(function(sel) {
+    var p = getPlayer(sel.player_id);
+    return '<option value="' + sel.player_id + '">' + (p ? p.name : '?') + '</option>';
+  }).join('');
+  openModal('modal-sub');
+}
+
+function confirmSub() {
+  var outPid = document.getElementById('sub-out').value;
+  var inPid = document.getElementById('sub-in').value;
+  var min = parseInt(document.getElementById('sub-min').value) || 60;
+  if (!outPid || !inPid) return;
+  match.subs.push({ out_player_id: outPid, in_player_id: inPid, minute: min });
+  // Mettre à jour les events
+  if (match.events[outPid]) { match.events[outPid].minutes_played = min; }
+  if (match.events[inPid]) { match.events[inPid].entry_minute = min; match.events[inPid].minutes_played = 90 - min; match.events[inPid].statut = 'remplacant_entre'; }
+  closeModal('modal-sub');
+  renderLive();
+}
+
+function endMatch() {
+  // Construire l'écran post-match
+  var allSels = match.titulaires.slice();
+  match.subs.forEach(function(s) {
+    var sel = match.remplacants.find(function(r) { return r.player_id === s.in_player_id; });
+    if (sel) allSels.push(sel);
+  });
+
+  var result = match.us > match.them ? 'V' : match.us < match.them ? 'D' : 'N';
+  var resultLabel = result === 'V' ? '🟢 Victoire' : result === 'D' ? '🔴 Défaite' : '🟡 Nul';
+  document.getElementById('post-result').textContent = resultLabel;
+  document.getElementById('post-score').textContent = match.us + ' — ' + match.them;
+  document.getElementById('post-summary').textContent = match.opp + ' · ' + (match.matchLevel || match.matchType);
+
+  // Sélecteur homme du match
+  var motmSel = document.getElementById('p-motm');
+  motmSel.innerHTML = '<option value="">— Sélectionner —</option>';
+  allSels.forEach(function(sel) {
+    var p = getPlayer(sel.player_id);
+    if (p) motmSel.innerHTML += '<option value="' + p.id + '">' + p.name + '</option>';
+  });
+
+  // Rendu notes joueurs
+  document.getElementById('post-players').innerHTML = allSels.map(function(sel) {
+    var p = getPlayer(sel.player_id);
+    var c = getCard(sel.card_id);
+    var ev = match.events[sel.player_id] || {};
+    if (!p) return '';
+    return '<div class="post-row">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+        playerAvatar(p.id, 28, 10) +
+        '<div style="flex:1">' +
+          '<div style="font-size:13px;font-weight:600">' + p.name + '</div>' +
+          '<div style="font-size:11px;color:var(--muted)">' +
+            '⚽ ' + (ev.goals || 0) + ' · 🎯 ' + (ev.assists || 0) +
+            (c?.efhub_stats?.position === 'GK' ? ' · 🧤 ' + (ev.saves || 0) : '') +
+            (ev.yellow_card ? ' 🟡' : '') + (ev.red_card ? ' 🔴' : '') +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">Note /10 (eFootball)</div>' +
+      '<div class="rating-btns">' +
+        [3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,9.5,10].map(function(n) {
+          return '<button class="rating-btn" id="r-' + sel.player_id + '-' + n + '" onclick="setRating(\'' + sel.player_id + '\',' + n + ')">' + n + '</button>';
+        }).join('') +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  go('screen-post');
+}
+
+function setRating(pid, val) {
+  ratings[pid] = val;
+  // Mettre à jour visuellement
+  [5,5.5,6,6.5,7,7.5,8,8.5,9,9.5,10].forEach(function(n) {
+    var btn = document.getElementById('r-' + pid + '-' + n);
+    if (btn) btn.classList.toggle('active', n === val);
+  });
+}
+
+// ── Save ──────────────────────────────────────────────────────────────────────
+function saveMatchFinal() {
+  var allSels = match.titulaires.slice();
+  match.subs.forEach(function(s) {
+    var sel = match.remplacants.find(function(r) { return r.player_id === s.in_player_id; });
+    if (sel) allSels.push(sel);
+  });
+
+  var result = match.us > match.them ? 'V' : match.us < match.them ? 'D' : 'N';
+
+  // Construire player_stats
+  var playerStats = allSels.map(function(sel) {
+    var ev = match.events[sel.player_id] || {};
+    return {
+      player_id: sel.player_id,
+      card_id: sel.card_id,
+      goals: ev.goals || 0,
+      assists: ev.assists || 0,
+      saves: ev.saves || 0,
+      yellow_card: ev.yellow_card || false,
+      red_card: ev.red_card || false,
+      rating: ratings[sel.player_id] || 0,
+      statut: ev.statut || 'titulaire',
+      entry_minute: ev.entry_minute || null,
+      minutes_played: ev.minutes_played || 90
+    };
+  });
+
+  var data = {
+    match_date: match.date,
+    match_time: match.time,
+    match_type: match.matchType,
+    match_level: match.matchLevel,
+    rank: match.matchLevel,
+    result: result,
+    score_for: match.us,
+    score_against: match.them,
+    build_id: match.buildId || null,
+    formation: match.formation,
+    opp_formation: match.oppFormation,
+    opp_name: match.opp,
+    opp_level: null,
+    my_rank: match.myRank,
+    opp_rank: match.oppRank,
+    my_strength: match.myStrength,
+    opp_strength: match.oppStrength,
+    attack1_instruction: match.attack1_instruction,
+    attack1_target: match.attack1_target,
+    attack2_instruction: match.attack2_instruction,
+    attack2_target: match.attack2_target,
+    defence1_instruction: match.defence1_instruction,
+    defence1_target: match.defence1_target,
+    defence2_instruction: match.defence2_instruction,
+    defence2_target: match.defence2_target,
+    titulaires: match.titulaires,
+    remplacants: match.remplacants,
+    substitutions: match.subs,
+    player_stats: playerStats,
+    man_of_match: document.getElementById('p-motm').value || null,
+    note: parseInt(document.getElementById('p-match-note').value) || 3,
+    repeated_opponent: document.getElementById('p-repeated').value === 'true',
+    source: 'live'
+  };
+
+  sbFetch('efb_matches', {
+    method: 'POST',
+    body: data,
+    prefer: 'return=minimal'
+  }).then(function() {
+    alert('✅ Match enregistré !');
+    // Reset
+    selectedTitu = []; selectedRempl = [];
+    match = { opp: '', matchType: '', matchLevel: '', formation: '', oppFormation: '', myRank: null, oppRank: null, myStrength: null, oppStrength: null, date: '', time: '', buildId: null, attack1_instruction: 'Off', attack1_target: null, attack2_instruction: 'Off', attack2_target: null, defence1_instruction: 'Off', defence1_target: null, defence2_instruction: 'Off', defence2_target: null, us: 0, them: 0, titulaires: [], remplacants: [], subs: [], events: {} };
+    ratings = {};
+    var now = new Date();
+    document.getElementById('p-date').value = now.toISOString().split('T')[0];
+    document.getElementById('p-time').value = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+    renderPrepLists();
+    go('screen-prep');
+  }).catch(function(e) {
+    alert('❌ Erreur : ' + e.message);
+  });
+}
+</script>
+</body>
+</html>
