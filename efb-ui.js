@@ -123,6 +123,7 @@ function renderEffectif() {
       ${renderSidebar()}
       <div class="effectif-main">
         ${player ? renderPlayerDetail(player) : renderEmptyState()}
+        <div id="squad23-container" style="margin-top:20px">${renderSquad23Section()}</div>
       </div>
     </div>
   `;
