@@ -372,6 +372,9 @@ function renderBuildCard(build, card) {
           <span class="build-pts ${pointsUsed === pointsMax ? 'full' : ''}">${pointsUsed} / ${pointsMax} pts</span>
         </div>
         <div class="build-card-actions">
+          <button class="btn-icon" onclick="addBuildToSquad23('${build.id}');event.stopPropagation()" title="Ajouter à la sélection">
+            <i class="ti ti-user-plus" id="squad-btn-${build.id}"></i>
+          </button>
           ${!isTrending ? `<button class="btn-icon" onclick="openModal('editBuild','${build.id}');event.stopPropagation()">
             <i class="ti ti-pencil"></i>
           </button>` : ''}
@@ -1175,10 +1178,10 @@ function loadSquad23IntoLineup() {
   } else if (_squad23.length > 0) {
     // Première fois — répartir depuis Squad 23
     _matchTitulaires = _squad23.slice(0, 11).map(function(s) {
-      return { player_id: s.player_id, card_id: s.card_id, build_id: s.build_id };
+      return { player_id: s.player_id, card_id: s.card_id, build_id: s.build_id, played: true };
     });
     _matchRemplacants = _squad23.slice(11).map(function(s) {
-      return { player_id: s.player_id, card_id: s.card_id, build_id: s.build_id };
+      return { player_id: s.player_id, card_id: s.card_id, build_id: s.build_id, played: false };
     });
   } else {
     _matchTitulaires = [];
@@ -1379,39 +1382,60 @@ function renderModalAddMatch(buildId) {
 function renderMatchGroupList(arr, isTitu) {
   const otherPids = (isTitu ? _matchRemplacants : _matchTitulaires).map(x => x.player_id);
   const max = isTitu ? 11 : 12;
+
   let html = arr.map((sel, i) => {
     const p = State.players.find(x => x.id === sel.player_id);
     const cards = State.cards[sel.player_id] || [];
     const c = cards.find(x => x.id === sel.card_id) || cards[0];
     const efhubId = p ? Efhub.parseId(p.efhub_url || '') : null;
     const imgUrl = efhubId ? Efhub.imgUrl(efhubId) : null;
+    const sq = _squad23.find(s => s.player_id === sel.player_id);
+    const buildId = sel.build_id || (sq ? sq.build_id : null);
+    const builds = c ? (State.builds[c.id] || []) : [];
+    const activeBuild = builds.find(b => b.id === buildId);
+    // Case "A joué" pour les remplaçants
+    const played = sel.played !== false; // true par défaut
     return `
       <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:0.5px solid var(--border)">
         ${imgUrl ? `<img src="${imgUrl}" style="width:24px;height:30px;border-radius:3px;object-fit:cover">` : ''}
-        <span style="flex:1;font-size:12px">${p ? p.name : '?'}</span>
-        ${c ? `<span style="font-size:10px;color:var(--muted)">${c.efhub_stats?.position || ''} · ${c.card_type || ''}</span>` : ''}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600">${p ? p.name : '?'}</div>
+          <div style="font-size:10px;color:var(--muted)">${c ? (c.efhub_stats?.position || '') : ''}${activeBuild ? ' · ' + activeBuild.name : ''}</div>
+        </div>
+        ${!isTitu ? `<label style="font-size:10px;color:var(--muted);display:flex;align-items:center;gap:3px;cursor:pointer">
+          <input type="checkbox" ${played ? 'checked' : ''} onchange="toggleMatchPlayerPlayed('${sel.player_id}',${i},this.checked)" style="width:12px;height:12px">
+          A joué
+        </label>` : ''}
         <button class="btn-icon danger" onclick="removeMatchGroupPlayer(${i},${isTitu ? 1 : 0})"><i class="ti ti-x"></i></button>
       </div>
     `;
   }).join('');
 
-  const available = State.players.filter(p =>
-    !arr.some(s => s.player_id === p.id) &&
-    !otherPids.includes(p.id) &&
-    (State.cards[p.id] || []).length > 0
+  // Disponibles = seulement depuis la Squad 23, excluant déjà sélectionnés et l'autre groupe
+  const squadPids = _squad23.map(s => s.player_id);
+  const available = _squad23.filter(sq =>
+    !arr.some(s => s.player_id === sq.player_id) &&
+    !otherPids.includes(sq.player_id)
   );
 
   if (arr.length < max && available.length > 0) {
     html += `
       <select class="form-input form-input-sm" style="margin-top:6px"
               onchange="addMatchGroupPlayer(this.value,${isTitu ? 1 : 0})">
-        <option value="">+ Ajouter...</option>
-        ${available.map(p => {
-          const cards = State.cards[p.id] || [];
-          return cards.map(c => `<option value="${p.id}|${c.id}">${p.name} — ${c.card_type || ''} ${c.efhub_stats?.position || ''}</option>`).join('');
+        <option value="">+ Ajouter depuis la Squad 23...</option>
+        ${available.map(sq => {
+          const p = State.players.find(x => x.id === sq.player_id);
+          const cards = State.cards[sq.player_id] || [];
+          const c = cards.find(x => x.id === sq.card_id) || cards[0];
+          const builds = c ? (State.builds[c.id] || []) : [];
+          const build = builds.find(b => b.id === sq.build_id);
+          const label = (p ? p.name : '?') + (c ? ' · ' + (c.efhub_stats?.position || '') : '') + (build ? ' — ' + build.name : '');
+          return `<option value="${sq.player_id}|${sq.card_id}|${sq.build_id || ''}">${label}</option>`;
         }).join('')}
       </select>
     `;
+  } else if (available.length === 0 && arr.length === 0 && _squad23.length === 0) {
+    html += '<div style="color:var(--amber);font-size:11px;padding:6px 0">&#9888; Definis d\'abord ta Squad 23 dans l\'onglet Effectif</div>';
   }
 
   if (arr.length === 0) html = '<div style="color:var(--muted);font-size:11px;padding:4px 0">Aucun joueur</div>' + html;
@@ -1435,10 +1459,24 @@ function addMatchGroupPlayer(val, isTitu) {
 
 function removeMatchGroupPlayer(idx, isTitu) {
   const arr = isTitu ? _matchTitulaires : _matchRemplacants;
+  const removed = arr[idx];
   arr.splice(idx, 1);
   saveLineupToStorage();
+  // Retirer des stats si titulaire retiré
+  if (isTitu && removed && _matchPlayerStats[removed.player_id]) {
+    const stats = _matchPlayerStats[removed.player_id];
+    if (stats.goals === 0 && stats.assists === 0 && stats.rating === 0) {
+      delete _matchPlayerStats[removed.player_id];
+      const sl = document.getElementById('match-player-stats-list');
+      if (sl) sl.innerHTML = renderMatchPlayerStatsListV2();
+    }
+  }
+  // Rafraîchir les 2 listes
   const el = document.getElementById(isTitu ? 'm-titu-list' : 'm-rempl-list');
   if (el) el.innerHTML = renderMatchGroupList(arr, !!isTitu);
+  const otherEl = document.getElementById(isTitu ? 'm-rempl-list' : 'm-titu-list');
+  const otherArr = isTitu ? _matchRemplacants : _matchTitulaires;
+  if (otherEl) otherEl.innerHTML = renderMatchGroupList(otherArr, !isTitu);
 }
 
 function renderMatchSubsList() {
@@ -1967,9 +2005,19 @@ async function confirmDelete(type, id) {
 var INSTRUCTIONS_STORAGE_KEY = 'efb_last_instructions';
 
 function initMatchPlayerStatsFromLineup() {
-  var allSels = _matchTitulaires.concat(_matchRemplacants);
-  allSels.forEach(function(sel) {
+  // Titulaires → toujours dans les stats
+  _matchTitulaires.forEach(function(sel) {
     if (!_matchPlayerStats[sel.player_id]) {
+      _matchPlayerStats[sel.player_id] = {
+        goals: 0, assists: 0, saves: 0,
+        yellow_card: false, red_card: false,
+        rating: 0, _collapsed: true
+      };
+    }
+  });
+  // Remplaçants → seulement ceux qui ont joué (played === true)
+  _matchRemplacants.forEach(function(sel) {
+    if (sel.played === true && !_matchPlayerStats[sel.player_id]) {
       _matchPlayerStats[sel.player_id] = {
         goals: 0, assists: 0, saves: 0,
         yellow_card: false, red_card: false,
@@ -2173,6 +2221,47 @@ function renderSquad23Section() {
   }
   html += '</div></div>';
   return html;
+}
+
+function addBuildToSquad23(buildId) {
+  loadSquad23();
+  var build = Object.values(State.builds).flat().find(function(b) { return b.id === buildId; });
+  if (!build) return;
+  var card = Object.values(State.cards).flat().find(function(c) { return c.id === build.card_id; });
+  if (!card) return;
+  var pid = card.player_id;
+
+  // Vérifier si le joueur est déjà dans la Squad 23
+  var existing = _squad23.find(function(s) { return s.player_id === pid; });
+  if (existing) {
+    // Mettre à jour le build actif
+    existing.build_id = buildId;
+    saveSquad23();
+    // Feedback visuel
+    var btn = document.getElementById('squad-btn-' + buildId);
+    if (btn) { btn.className = 'ti ti-check'; setTimeout(function() { btn.className = 'ti ti-user-plus'; }, 1500); }
+    var el = document.getElementById('squad23-container');
+    if (el) el.innerHTML = renderSquad23Section();
+    return;
+  }
+
+  // Vérifier la limite de 23
+  if (_squad23.length >= 23) {
+    alert('La sélection est déjà complète (23 joueurs)');
+    return;
+  }
+
+  // Ajouter le joueur avec ce build
+  _squad23.push({ player_id: pid, card_id: card.id, build_id: buildId });
+  saveSquad23();
+
+  // Feedback visuel
+  var btn = document.getElementById('squad-btn-' + buildId);
+  if (btn) { btn.className = 'ti ti-check'; setTimeout(function() { btn.className = 'ti ti-user-plus'; }, 1500); }
+
+  // Rafraîchir la section Squad 23
+  var el = document.getElementById('squad23-container');
+  if (el) el.innerHTML = renderSquad23Section();
 }
 
 function addToSquad23(val) {
