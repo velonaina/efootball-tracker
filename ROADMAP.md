@@ -1,6 +1,6 @@
 # eFootball Tracker — Roadmap & Documentation
 
-## État actuel du projet (v1.0)
+## État actuel du projet (v2.0)
 
 ### Stack technique
 - **Frontend** : HTML / CSS / JavaScript vanilla (3 fichiers)
@@ -13,9 +13,9 @@
 ### Fichiers du projet
 | Fichier | Rôle |
 |---|---|
-| `efb-app.html` | App principale PC — HTML + CSS |
-| `efb-data.js` | Couche données — Supabase CRUD + logique métier + SLIDERS_CONFIG + EFB_STATS_ORDER |
-| `efb-ui.js` | Interface — rendu + interactions (~2500 lignes) |
+| `efb-app.html` | App principale PC — HTML + CSS (~700 lignes) |
+| `efb-data.js` | Couche données — Supabase CRUD + logique métier + SLIDERS_CONFIG + EFB_STATS_ORDER + Analyse |
+| `efb-ui.js` | Interface — rendu + interactions (~5100 lignes) |
 | `efb-live.html` | App mobile légère — saisie live pendant le match |
 | `efb_schema_v2.sql` | Schéma Supabase v2 |
 | `efhub-proxy-worker-v11.js` | Cloudflare Worker — proxy efhub + Anthropic |
@@ -31,6 +31,7 @@
 - Photo automatique via efimg.com
 - Sidebar avec liste des joueurs + photo + badge card type + playing style
 - CRUD complet (ajouter, modifier, supprimer)
+- Cartes Trending : bouton "Ajouter à la sélection" directement sans build
 
 ### Types de cartes supportés
 - Standard, Featured, Epic, Iconic, Iconic Moment, Legendary, Trending
@@ -39,99 +40,109 @@
 
 ### Builds
 - 10 sliders de progression avec règle de clic eFootball
-  - Clics 1-4 = 1pt, 5-8 = 2pts, 9-12 = 3pts...
-  - Points max selon level_cap : {22:42, 25:48, 28:54, 30:58, 33:64, 35:68, 40:78}
-- Mapping sliders → stats efhub :
-  - Shooting → finishing, setPieceTaking, curl
-  - Passing → lowPass, loftedPass
-  - Dribbling → ballControl, dribbling, tightPossession
-  - Dexterity → offensiveAwareness, acceleration, balance
-  - Lower Body → speed, kickingPower, stamina
-  - Aerial → heading, jump, physicalContact
-  - Defending → defensiveAwareness, trackingBack, ballWinning, aggression
-  - GK 1 → gkAwareness, jump
-  - GK 2 → gkClearing, gkReach
-  - GK 3 → gkCatching, gkReflexes
+- Mapping sliders → stats efhub (Shooting, Passing, Dribbling, Dexterity, Lower Body, Aerial, Defending, GK 1/2/3)
 - Présentation style efhub (icônes compactes + nombre de clics)
 - Expand/collapse pour stats finales + additional skills (max 5, bloqué pour Trending)
-- Bouton "Ajouter à la sélection" (Squad 23) directement sur chaque build card
+- Bouton "Ajouter à la sélection" (Squad 23) sur chaque build card
 - Modifier un build existant (sliders + nom)
-- Cartes Trending : pas de sliders, skills figés
+- **Tous les builds chargés au démarrage** (plus de dropdown vide)
 
 ### Squad 23
 - Présélection de 23 joueurs avec leur build actif dans l'onglet Effectif
-- Build actif choisi par joueur (modifiable à chaque match)
+- Build actif choisi par joueur — **source de vérité unique** pour Formation, Match et Analyse
 - Sauvegardé automatiquement en localStorage
-- Alimente directement les listpickers titulaires/remplaçants dans le modal match
+- Alimente directement la Formation et le modal match
 
-### Enregistrement des matchs (efb-app.html)
-- Titulaires (11) + remplaçants (12) depuis la Squad 23
-- Exclusion mutuelle titulaires/remplaçants dans les listpickers
-- Case "A joué" pour les remplaçants non utilisés
-- Substitutions avec minute d'entrée/sortie
+### Onglet Formation (nouveau) ✨
+- **Terrain interactif** avec positions selon la formation
+- **Picker de formation** : 20 formations standard + formations personnalisées
+- **Éditeur de formation custom** : drag & drop des nœuds sur terrain SVG, labels éditables, sauvegarde localStorage
+- **Interdiction de nommer** une formation custom comme une formation standard
+- **Swap de joueurs** : clic → clic pour échanger deux positions
+- **Détection automatique de rôle** au drag (termes efhub : GK, CB, LB, RB, DMF, CMF, AMF, LMF, RMF, LWF, RWF, SS, CF)
+- **Séparateurs redimensionnables** : vertical (terrain/droite) + horizontal (assignation/banc)
+- Mode Terrain + mode Liste
+- Sauvegarde → synchronisation automatique vers modal match (LINEUP_STORAGE_KEY + FT_STORAGE_KEY)
+- Échange banc/terrain : swap automatique des places
+
+### Modal match redesign (nouveau) ✨
+- **2 onglets** : Match + Résumé
+- **Layout plein écran** (95vw) avec terrain permanent à gauche
+- **Terrain interactif** :
+  - Swap de joueurs : clic → clic pour échanger deux positions
+  - Surbrillance orange + halos pointillés pour les cibles d'échange
+  - Bouton changer de rôle dans la fiche joueur (picker GK/CB/LB/RB/DMF/CMF/AMF/LMF/RMF/LWF/RWF/SS/CF)
+- **Banc toujours visible** sous le terrain (remplaçants disponibles + déjà entrés)
+- **Fiche joueur** toujours visible en bas à droite au clic
+- **Séparateurs redimensionnables** : vertical (terrain/infos) + horizontal (infos/fiche joueur)
+- Composition pré-remplie depuis l'onglet Formation
+- Formation mémorisée entre les matchs
+- **Substitutions** : depuis le banc visible, minute éditable inline, bouton Annuler
+- **Instructions individuelles** :
+  - Auto-sauvegarde dès modification (localStorage)
+  - Targeted Player limité aux joueurs sur le terrain
+- **Notes joueurs** : échelle 1 à 10 par pas de 0.5 (0 = non noté)
+- Onglet Résumé : liste des builds utilisés par joueur avant enregistrement
+
+### Enregistrement des matchs
+- Titulaires (11) + remplaçants (12) depuis Formation/Squad 23
+- Substitutions avec minute modifiable
 - Instructions individuelles 4 slots (Attack 1/2, Defence 1/2 + Targeted Player)
-- Instructions mémorisées automatiquement (localStorage) entre les matchs
-- Stats individuelles par joueur :
-  - Buts, passes décisives, arrêts (GK seulement)
-  - Cartons jaune/rouge
-  - Note /10 eFootball (3.0 à 10.0)
-  - Auto-ajout depuis la composition (collapse par défaut, expand pour noter)
-- Homme du match (sélection manuelle)
-- Note globale match 1-5
-- Adversaire répétitif (checkbox)
-- Date et heure (pré-remplies avec maintenant)
-- Formation + formation adverse
-- Rang + rangs joueurs
-- `build_id` sauvegardé par joueur dans `player_stats`
-- `source: 'app'` ou `'live'`
-- Modifier un match enregistré
+- Stats individuelles : buts, passes (icône shoe), arrêts GK, cartons jaune/rouge, note 1-10
+- Homme du match, note globale 1-5, adversaire répétitif
+- `build_id` sauvegardé par joueur dans `player_stats` (depuis Squad 23)
+- Formation, formation adverse, rang, rangs pts, date, heure, type de match
+
+### Recherche globale (nouveau) ✨
+- Barre de recherche dans le header — accessible depuis tous les onglets
+- Overlay avec résultats groupés : Joueurs, Builds, Matchs
+- Navigation directe au clic (sélectionne le joueur, le build ou scroll vers le match)
+- Fermeture Escape ou clic extérieur
+
+### Analyse étendue (nouveau) ✨
+- KPIs globaux (matchs, victoires, buts marqués/encaissés, taux de victoire, série)
+- Série actuelle + record avec timeline
+- Coaching IA (Claude API via Supabase Edge Function)
+- **Performance par type de match** (Ligue JCJ D1/D2/D3, IA, Évènement, Amical...)
+- **Performance par rang**
+- **Performance par formation** (taux de victoire par formation utilisée)
+- **Performance par build** (taux de victoire + buts + passes + note moyenne par build)
+- **Meilleur XI** : 11 joueurs avec le meilleur taux de victoire (min 3 matchs)
+- **Top joueurs** : buteurs, passeurs, meilleures notes moyennes
 
 ### App live mobile (efb-live.html)
 - 3 écrans : Préparation → Live → Post-match
-- Score en temps réel (+ / -)
-- Stats live par joueur (buts, passes, arrêts GK, cartons)
-- Remplacements avec minute
-- Notes /10 après match
-- Homme du match
-- Synchronisation Supabase (même tables que efb-app)
-- `source: 'live'`
-
-### Analyse
-- KPIs globaux (matchs, victoires, nuls, défaites, taux de victoire)
-- Série actuelle + record de victoires
-- Performance par rang
-- Coaching IA (bouton "Générer") :
-  - Analyse builds + joueurs + combinaisons XI
-  - Recommandations personnalisées via Claude API
-  - Via Supabase Edge Function (pas de CORS)
+- Score en temps réel, stats live, remplacements, notes, homme du match
+- Synchronisation Supabase — `source: 'live'`
+- ⚠️ **À mettre à jour** — désynchronisé avec les nouvelles structures
 
 ### Technique
-- Cloudflare Worker v11 : proxy efhub + route `/coaching` désactivée (remplacée par Edge Function)
+- Cloudflare Worker v11 : proxy efhub
 - Supabase Edge Function `coaching` : proxy API Anthropic
-- `ANTHROPIC_API_KEY` stockée dans Supabase Secrets (sécurisé)
+- `ANTHROPIC_API_KEY` stockée dans Supabase Secrets
 - Clé Supabase `anon` dans les fichiers (repo privé)
+- **Tous les builds chargés au démarrage** via `Builds.getAll()`
 
 ---
 
 ## Fonctionnalités en attente ⏳
 
 ### Priorité haute
-- **Recherche globale** — chercher un joueur, un build, un match dans l'app
-- **Onglet Matchs global** — liste de tous les matchs avec filtres (rang, résultat, date)
-- **Analyse par build** — taux de victoire, série, notes joueurs par build utilisé
-- **Analyse par joueur** — performance individuelle sur la durée
+- **Mettre à jour efb-live.html** — désynchronisé avec les nouvelles structures (Formation, modal match, builds)
+- **Import automatique E1** — importer les données depuis efhub directement
+- **Onglet Matchs** — filtres avancés (rang, résultat, date, formation, type)
 
 ### Priorité moyenne
-- **Import automatique E1** — importer les données depuis efhub directement (roadmap v3 Phase E)
 - **Export PDF/CSV** — exporter les stats pour partage
 - **Notifications de série** — alerte quand tu bats ton record de victoires
 - **Comparaison de builds** — comparer 2 builds côte à côte
 - **Historique des builds** — voir l'évolution d'un build dans le temps
+- **Récapitulatif automatique** dans l'onglet Résumé (buteurs, MOTM généré depuis les stats)
 
 ### Priorité basse
 - **Mode sombre/clair** — toggle thème (actuellement dark only)
 - **Multi-équipes** — supporter d'autres équipes que Real Madrid
-- **Partage de builds** — exporter un build pour partager avec d'autres joueurs
+- **Partage de builds** — exporter un build pour partager
 - **Statistiques avancées** — xG, possession, pressing...
 
 ---
@@ -142,16 +153,15 @@
 - Paginer les matchs (actuellement on charge tout)
 - Mettre en cache les données efhub (éviter les appels répétés)
 - Lazy loading des photos de joueurs
+- efb-ui.js dépasse 5000 lignes — envisager un découpage modulaire
 
 ### UX
-- Confirmation visuelle après sauvegarde (toast notification au lieu d'alert)
+- Toast notification après sauvegarde (au lieu d'alert)
 - Raccourcis clavier pour les actions fréquentes
-- Drag & drop pour réorganiser la Squad 23
 - Swipe pour naviguer entre les onglets sur mobile
 
 ### Données
 - Ajouter `opp_style` (style de jeu adverse) dans les matchs
-- Ajouter `weather` / `mood` pour contextualiser les performances
 - Tracker les blessures et suspensions
 
 ### Sécurité
@@ -192,13 +202,33 @@
 
 ---
 
+## localStorage keys
+
+| Clé | Contenu |
+|---|---|
+| `efb_squad_23` | Squad 23 — [{player_id, card_id, build_id}] |
+| `efb_last_lineup` | Dernière composition match — {titulaires, remplacants} |
+| `efb_ft_lineup` | Composition Formation — {formation, titulaires, remplacants} |
+| `efb_last_instructions` | Dernières instructions individuelles |
+| `efb_custom_formations` | Formations personnalisées — {name: {slots, custom}} |
+
+---
+
+## Formations supportées (20)
+
+`4-3-3` · `4-3-3 ATT` · `4-3-3 DEF` · `4-4-2` · `4-4-2 FLAT` · `4-2-3-1` · `4-1-4-1` · `4-3-1-2` · `4-3-2-1` · `4-4-1-1` · `4-5-1` · `3-5-2` · `3-4-3` · `3-4-2-1` · `3-3-3-1` · `5-3-2` · `5-4-1` · `5-2-3` · `5-2-2-1` · `4-6-0`
+
+Positions efhub : `GK` · `CB` · `LB` · `RB` · `DMF` · `CMF` · `AMF` · `LMF` · `RMF` · `LWF` · `RWF` · `SS` · `CF`
+
+---
+
 ## Règles importantes à ne pas oublier
 
 ### eFootball
 - Level cap 1 = carte Trending (figée, non développable)
 - Points max par level cap : 22→42, 25→48, 28→54, 30→58, 33→64, 35→68, 40→78
 - Règle de clic : clics 1-4=1pt, 5-8=2pts, 9-12=3pts...
-- Notes eFootball : de 3.0 à 10.0 (par pas de 0.5)
+- Notes eFootball : de 1.0 à 10.0 (par pas de 0.5) — 0 = non noté
 - Additional skills : max 5 par carte (sauf Trending = 0)
 
 ### Développement
@@ -206,6 +236,8 @@
 - Ne jamais utiliser de backticks imbriqués dans les template strings
 - Utiliser `String.fromCharCode(39)` pour les guillemets simples dans les strings JS générées
 - Après chaque session : push sur GitHub + incrémenter version dans les commentaires
-- efb-data.js contient toute la logique métier (SLIDERS_CONFIG, EFB_STATS_ORDER, Progression, Analyse)
+- efb-data.js contient toute la logique métier
 - efb-ui.js contient tout le rendu et les interactions
-- Les 2 fichiers ne doivent pas dépasser ~3000 lignes chacun
+- Ne jamais nommer une formation custom avec le même nom qu'une formation standard
+- `LINEUP_STORAGE_KEY` et `SQUAD_STORAGE_KEY` déclarés en haut de efb-ui.js (avant ftSave)
+- Builds chargés au démarrage via `Builds.getAll()` dans `init()`
