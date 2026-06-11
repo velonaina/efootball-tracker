@@ -613,11 +613,11 @@ async function generateCoaching() {
 
     const prompt = buildCoachingPrompt(coachingData);
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const response = await fetch(EFB_CONFIG.supabaseUrl + '/functions/v1/coaching', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 1000,
         messages: [{ role: 'user', content: prompt }]
       })
