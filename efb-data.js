@@ -284,110 +284,52 @@ const SLIDERS_CONFIG = [
   {
     key: 'shooting', label: 'Shooting',
     stats: ['finishing', 'setPieceTaking', 'curl'],
-    icon: `<svg viewBox="0 0 56 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="28" cy="32" r="10" stroke="currentColor" stroke-width="2"/>
-      <line x1="28" y1="22" x2="28" y2="10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-      <line x1="18" y1="32" x2="6" y2="32" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-      <line x1="38" y1="32" x2="50" y2="32" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-      <line x1="28" y1="42" x2="28" y2="50" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-      <polygon points="28,6 24,12 32,12" fill="currentColor"/>
-      <polygon points="2,32 8,28 8,36" fill="currentColor"/>
-      <polygon points="54,32 48,28 48,36" fill="currentColor"/>
-      <polygon points="28,54 24,48 32,48" fill="currentColor"/>
-      <circle cx="28" cy="32" r="4" fill="currentColor"/>
-    </svg>`
+    icon: `<i class="ti ti-focus-2" style="font-size:24px;color:currentColor"></i>`
   },
   {
     key: 'passing', label: 'Passing',
     stats: ['lowPass', 'loftedPass'],
-    icon: `<svg viewBox="0 0 56 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="28" cy="30" r="18" stroke="currentColor" stroke-width="2"/>
-      <polygon points="28,17 35,22 33,30 23,30 21,22" fill="currentColor"/>
-      <line x1="28" y1="17" x2="28" y2="12" stroke="currentColor" stroke-width="1.5"/>
-      <line x1="35" y1="22" x2="40" y2="19" stroke="currentColor" stroke-width="1.5"/>
-      <line x1="33" y1="30" x2="38" y2="33" stroke="currentColor" stroke-width="1.5"/>
-      <line x1="23" y1="30" x2="18" y2="33" stroke="currentColor" stroke-width="1.5"/>
-      <line x1="21" y1="22" x2="16" y2="19" stroke="currentColor" stroke-width="1.5"/>
-    </svg>`
+    icon: `<i class="ti ti-ball-football" style="font-size:24px;color:currentColor"></i>`
   },
   {
     key: 'dribbling', label: 'Dribbling',
     stats: ['ballControl', 'dribbling', 'tightPossession'],
-    icon: `<svg viewBox="0 0 56 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <polygon points="28,10 40,44 16,44" fill="currentColor"/>
-      <rect x="14" y="44" width="28" height="5" rx="2" fill="currentColor"/>
-      <rect x="18" y="26" width="20" height="3" rx="1" fill="#0f1117"/>
-      <rect x="20" y="34" width="16" height="3" rx="1" fill="#0f1117"/>
-    </svg>`
+    icon: `<i class="ti ti-brand-vlc" style="font-size:24px;color:currentColor"></i>`
   },
   {
     key: 'dexterity', label: 'Dexterity',
     stats: ['offensiveAwareness', 'acceleration', 'balance'],
-    icon: `<svg viewBox="0 0 56 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M10 50 L10 36 L22 24 L34 36 L34 22 L46 10" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-      <polygon points="46,6 42,14 50,14" fill="currentColor"/>
-    </svg>`
+    icon: `<i class="ti ti-activity" style="font-size:24px;color:currentColor"></i>`
   },
   {
     key: 'lowerbody', label: 'Lower Body',
     stats: ['speed', 'kickingPower', 'stamina'],
-    icon: `<svg viewBox="0 0 56 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M8 42 L8 26 Q8 18 16 18 L24 18 L28 12 L36 12 L36 18 L42 18 Q48 18 48 26 L48 32 L42 32 L42 26 L14 26 L14 42 Z" fill="currentColor"/>
-      <rect x="10" y="42" width="5" height="6" rx="1" fill="currentColor"/>
-      <rect x="18" y="42" width="5" height="6" rx="1" fill="currentColor"/>
-      <rect x="26" y="42" width="5" height="6" rx="1" fill="currentColor"/>
-      <rect x="34" y="42" width="5" height="6" rx="1" fill="currentColor"/>
-    </svg>`
+    icon: `<i class="ti ti-shoe" style="font-size:24px;color:currentColor"></i>`
   },
   {
     key: 'aerial', label: 'Aerial',
     stats: ['heading', 'jump', 'physicalContact'],
-    icon: `<svg viewBox="0 0 56 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M14 50 L28 34 L42 50" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-      <path d="M14 34 L28 18 L42 34" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    </svg>`
+    icon: `<i class="ti ti-chevrons-up" style="font-size:24px;color:currentColor"></i>`
   },
   {
     key: 'defending', label: 'Defending',
     stats: ['defensiveAwareness', 'trackingBack', 'ballWinning', 'aggression'],
-    icon: `<svg viewBox="0 0 56 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M28 10 L46 18 L46 32 Q46 46 28 52 Q10 46 10 32 L10 18 Z" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
-      <line x1="28" y1="10" x2="28" y2="52" stroke="currentColor" stroke-width="2"/>
-      <path d="M10 28 Q19 28 28 34 Q37 28 46 28" stroke="currentColor" stroke-width="1.5" fill="none"/>
-    </svg>`
+    icon: `<i class="ti ti-shield" style="font-size:24px;color:currentColor"></i>`
   },
   {
     key: 'gk1', label: 'GK 1',
     stats: ['gkAwareness', 'jump'],
-    icon: `<svg viewBox="0 0 56 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M14 48 L14 28 Q14 22 18 22 L18 17 Q18 12 22 12 Q26 12 26 17 L26 22 Q29 22 31 25 Q33 28 33 32 L33 40 Q33 46 26 48 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-      <line x1="18" y1="22" x2="18" y2="48" stroke="currentColor" stroke-width="1.5"/>
-      <line x1="22" y1="18" x2="22" y2="48" stroke="currentColor" stroke-width="1.5"/>
-      <line x1="26" y1="22" x2="26" y2="48" stroke="currentColor" stroke-width="1.5"/>
-      <text x="38" y="36" font-family="-apple-system,sans-serif" font-size="14" font-weight="700" fill="currentColor">1</text>
-    </svg>`
+    icon: `<i class="ti ti-hand-stop" style="font-size:24px;color:currentColor"></i><sup style="font-size:10px;font-weight:700">1</sup>`
   },
   {
     key: 'gk2', label: 'GK 2',
     stats: ['gkClearing', 'gkReach'],
-    icon: `<svg viewBox="0 0 56 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M14 48 L14 28 Q14 22 18 22 L18 17 Q18 12 22 12 Q26 12 26 17 L26 22 Q29 22 31 25 Q33 28 33 32 L33 40 Q33 46 26 48 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-      <line x1="18" y1="22" x2="18" y2="48" stroke="currentColor" stroke-width="1.5"/>
-      <line x1="22" y1="18" x2="22" y2="48" stroke="currentColor" stroke-width="1.5"/>
-      <line x1="26" y1="22" x2="26" y2="48" stroke="currentColor" stroke-width="1.5"/>
-      <text x="38" y="36" font-family="-apple-system,sans-serif" font-size="14" font-weight="700" fill="currentColor">2</text>
-    </svg>`
+    icon: `<i class="ti ti-hand-stop" style="font-size:24px;color:currentColor"></i><sup style="font-size:10px;font-weight:700">2</sup>`
   },
   {
     key: 'gk3', label: 'GK 3',
     stats: ['gkCatching', 'gkReflexes'],
-    icon: `<svg viewBox="0 0 56 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M14 48 L14 28 Q14 22 18 22 L18 17 Q18 12 22 12 Q26 12 26 17 L26 22 Q29 22 31 25 Q33 28 33 32 L33 40 Q33 46 26 48 Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-      <line x1="18" y1="22" x2="18" y2="48" stroke="currentColor" stroke-width="1.5"/>
-      <line x1="22" y1="18" x2="22" y2="48" stroke="currentColor" stroke-width="1.5"/>
-      <line x1="26" y1="22" x2="26" y2="48" stroke="currentColor" stroke-width="1.5"/>
-      <text x="38" y="36" font-family="-apple-system,sans-serif" font-size="14" font-weight="700" fill="currentColor">3</text>
-    </svg>`
+    icon: `<i class="ti ti-hand-stop" style="font-size:24px;color:currentColor"></i><sup style="font-size:10px;font-weight:700">3</sup>`
   },
 ];
 

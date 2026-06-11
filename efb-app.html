@@ -296,7 +296,8 @@ input:focus, select:focus { border-color: var(--accent); }
 .build-player-pos { font-size: 10px; color: var(--accent); }
 .build-icons-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .build-slider-icon-wrap { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-.build-slider-svg { width: 28px; height: 28px; color: #e2e8f0; }
+.build-slider-svg { width: 28px; height: 28px; color: #e2e8f0; display:flex;align-items:center;justify-content:center; }
+.build-slider-svg i { font-size: 22px; }
 .build-slider-svg svg { width: 100%; height: 100%; }
 .build-slider-count { font-size: 12px; font-weight: 700; color: #e2e8f0; }
 .build-empty-sliders { font-size: 11px; color: var(--muted); }
@@ -333,7 +334,8 @@ input:focus, select:focus { border-color: var(--accent); }
 /* ── Build slider form ───────────────────────────────────────────────────── */
 .build-pts-bar-wrap { height: 4px; background: var(--surface3); border-radius: 2px; overflow: hidden; margin-top: 6px; }
 .build-pts-bar { height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.2s, background 0.2s; }
-.build-slider-svg-icon { width: 32px; height: 32px; color: #e2e8f0; flex-shrink: 0; }
+.build-slider-svg-icon { width: 32px; height: 32px; color: #e2e8f0; flex-shrink: 0; display:flex;align-items:center;justify-content:center; }
+.build-slider-svg-icon i { font-size: 24px; }
 .build-slider-svg-icon svg { width: 100%; height: 100%; }
 .build-slider-form-info { flex: 1; min-width: 0; }
 .build-slider-form-label { display: block; font-size: 12px; color: var(--text); }
@@ -397,7 +399,7 @@ input:focus, select:focus { border-color: var(--accent); }
 </head>
 <body>
 <div id="app"></div>
-<script src="efb-data.js"></script>
+  <script src="efb-data.js"></script>
 <script src="efb-ui.js"></script>
 <script>
   document.addEventListener('DOMContentLoaded', init);

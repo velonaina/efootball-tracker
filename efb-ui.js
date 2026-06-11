@@ -396,7 +396,7 @@ function renderBuildCard(build, card) {
         <div class="build-icons-row">
           ${activeSliders.map(s => `
             <div class="build-slider-icon-wrap">
-              <div class="build-slider-svg">${s.icon}</div>
+              <div class="build-slider-svg" style="display:flex;align-items:center;justify-content:center;color:#e2e8f0">${s.icon}</div>
               <span class="build-slider-count">${sliders[s.key]}</span>
             </div>
           `).join('')}
@@ -1078,7 +1078,7 @@ function renderModalAddBuild(cardId) {
             const avgBase = affectedStats.length > 0 ? Math.round(affectedStats.reduce((a,b)=>a+b,0)/affectedStats.length) : 0;
             return `
               <div class="build-slider-form-row">
-                <div class="build-slider-svg-icon">${s.icon}</div>
+                <div class="build-slider-svg-icon" style="display:flex;align-items:center;justify-content:center;color:#e2e8f0">${s.icon}</div>
                 <div class="build-slider-form-info">
                   <span class="build-slider-form-label">${s.label}</span>
                   <span class="build-slider-form-stats">${s.stats.map(sk => {
@@ -1811,13 +1811,38 @@ function updateMatchStat(pid, stat, delta) {
 function toggleMatchCard(pid, type) {
   if (!_matchPlayerStats[pid]) return;
   _matchPlayerStats[pid][type + '_card'] = !_matchPlayerStats[pid][type + '_card'];
-  document.getElementById('match-player-stats-list').innerHTML = renderMatchPlayerStatsList();
+  // Mettre à jour seulement le bouton carton sans re-render complet
+  var row = document.getElementById('mpsr-' + pid);
+  if (row) {
+    var yellowBtn = row.querySelector('.card-btn-small.active-yellow, .card-btn-small:not(.active-red)');
+    // Re-render uniquement cette ligne
+    var newHtml = renderSinglePlayerStatRow(pid);
+    if (newHtml && row) row.outerHTML = newHtml;
+  }
 }
 
 function setMatchPlayerRating(pid, val) {
   if (!_matchPlayerStats[pid]) return;
   _matchPlayerStats[pid].rating = val;
-  document.getElementById('match-player-stats-list').innerHTML = renderMatchPlayerStatsList();
+  // Mettre à jour seulement les boutons de note
+  var row = document.getElementById('mpsr-' + pid);
+  if (row) {
+    var newHtml = renderSinglePlayerStatRow(pid);
+    if (newHtml) row.outerHTML = newHtml;
+  }
+  // Mettre à jour le résumé dans le header
+  var headerSummary = document.querySelector('#mpsr-' + pid + ' .match-player-stat-header span[style*="muted"]');
+  if (headerSummary) {
+    var stats = _matchPlayerStats[pid];
+    var parts = [];
+    if (stats.goals > 0) parts.push('Buts: ' + stats.goals);
+    if (stats.assists > 0) parts.push('Passes: ' + stats.assists);
+    if (stats.saves > 0) parts.push('Arrets: ' + stats.saves);
+    if (stats.yellow_card) parts.push('Jaune');
+    if (stats.red_card) parts.push('Rouge');
+    if (stats.rating > 0) parts.push(stats.rating + '/10');
+    headerSummary.textContent = parts.length > 0 ? parts.join(' | ') : 'Aucune stat';
+  }
 }
 
 function selectResult(val) {
@@ -2061,19 +2086,103 @@ function applyLastInstructions() {
   } catch(e) {}
 }
 
+// Render une seule ligne de stats joueur (pour mise à jour partielle)
+function renderSinglePlayerStatRow(pid) {
+  var stats = _matchPlayerStats[pid];
+  if (!stats) return '';
+  var player = State.players.find(function(p) { return p.id === pid; });
+  var cards = State.cards[pid] || [];
+  var card = cards[0];
+  var isGK = card && card.efhub_stats && card.efhub_stats.position === 'GK';
+  var efhubId = player ? Efhub.parseId(player.efhub_url || '') : null;
+  var imgUrl = efhubId ? Efhub.imgUrl(efhubId) : null;
+  var isCollapsed = stats._collapsed !== false;
+  var isFromLineup = _matchTitulaires.concat(_matchRemplacants).some(function(s) { return s.player_id === pid; });
+  var q = String.fromCharCode(39);
+
+  var parts = [];
+  if (stats.goals > 0) parts.push('Buts: ' + stats.goals);
+  if (stats.assists > 0) parts.push('Passes: ' + stats.assists);
+  if (stats.saves > 0) parts.push('Arrets: ' + stats.saves);
+  if (stats.yellow_card) parts.push('Jaune');
+  if (stats.red_card) parts.push('Rouge');
+  if (stats.rating > 0) parts.push(stats.rating + '/10');
+  var summary = parts.length > 0 ? parts.join(' | ') : 'Aucune stat';
+
+  // SVG icônes
+  var iconBut = '<i class="ti ti-target-arrow" style="font-size:16px"></i>';
+  var iconPasse = '<i class="ti ti-ball-football" style="font-size:16px"></i>';
+  var iconGK = '<i class="ti ti-hand-stop" style="font-size:16px"></i>';
+
+  var html = '<div class="match-player-stat-row" id="mpsr-' + pid + '">';
+  html += '<div class="match-player-stat-header" onclick="toggleMatchPlayerCollapse(' + q + pid + q + ')" style="cursor:pointer">';
+  if (imgUrl) html += '<img src="' + imgUrl + '" style="width:24px;height:30px;border-radius:3px;object-fit:cover">';
+  html += '<span class="match-player-stat-name">' + (player ? player.name : pid) + '</span>';
+  html += '<span style="font-size:10px;color:var(--muted);flex:1;margin-left:6px">' + summary + '</span>';
+  html += '<i class="ti ' + (isCollapsed ? 'ti-chevron-down' : 'ti-chevron-up') + '" style="font-size:12px;color:var(--muted)"></i>';
+  if (!isFromLineup) {
+    html += '<button class="btn-icon danger" style="margin-left:4px" onclick="removeMatchPlayerStat(' + q + pid + q + ');event.stopPropagation()"><i class="ti ti-x"></i></button>';
+  }
+  html += '</div>';
+
+  if (!isCollapsed) {
+    html += '<div class="match-player-stat-fields">';
+    html += '<div class="match-stat-field">' + iconBut;
+    html += '<button class="btn-click" onclick="updateMatchStat(' + q + pid + q + ',' + q + 'goals' + q + ',-1)">-</button>';
+    html += '<span id="mps-goals-' + pid + '">' + stats.goals + '</span>';
+    html += '<button class="btn-click" onclick="updateMatchStat(' + q + pid + q + ',' + q + 'goals' + q + ',1)">+</button></div>';
+
+    html += '<div class="match-stat-field">' + iconPasse;
+    html += '<button class="btn-click" onclick="updateMatchStat(' + q + pid + q + ',' + q + 'assists' + q + ',-1)">-</button>';
+    html += '<span id="mps-assists-' + pid + '">' + stats.assists + '</span>';
+    html += '<button class="btn-click" onclick="updateMatchStat(' + q + pid + q + ',' + q + 'assists' + q + ',1)">+</button></div>';
+
+    if (isGK) {
+      html += '<div class="match-stat-field">' + iconGK;
+      html += '<button class="btn-click" onclick="updateMatchStat(' + q + pid + q + ',' + q + 'saves' + q + ',-1)">-</button>';
+      html += '<span id="mps-saves-' + pid + '">' + stats.saves + '</span>';
+      html += '<button class="btn-click" onclick="updateMatchStat(' + q + pid + q + ',' + q + 'saves' + q + ',1)">+</button></div>';
+    }
+
+    html += '<button class="card-btn-small ' + (stats.yellow_card ? 'active-yellow' : '') + '" onclick="toggleMatchCard(' + q + pid + q + ',' + q + 'yellow' + q + ')">🟡</button>';
+    html += '<button class="card-btn-small ' + (stats.red_card ? 'active-red' : '') + '" onclick="toggleMatchCard(' + q + pid + q + ',' + q + 'red' + q + ')">🔴</button>';
+    html += '</div>';
+
+    html += '<div class="match-player-rating"><span style="font-size:10px;color:var(--muted)">Note eFootball /10</span>';
+    html += '<div class="rating-mini-btns">';
+    [3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,9.5,10].forEach(function(n) {
+      html += '<button class="rating-mini-btn ' + (stats.rating === n ? 'active' : '') + '" onclick="setMatchPlayerRating(' + q + pid + q + ',' + n + ')">' + n + '</button>';
+    });
+    html += '</div></div>';
+  }
+  html += '</div>';
+  return html;
+}
+
 function toggleMatchPlayerCollapse(pid) {
   if (_matchPlayerStats[pid]) {
     _matchPlayerStats[pid]._collapsed = !_matchPlayerStats[pid]._collapsed;
-    document.getElementById('match-player-stats-list').innerHTML = renderMatchPlayerStatsListV2();
+    var row = document.getElementById('mpsr-' + pid);
+    if (row) row.outerHTML = renderSinglePlayerStatRow(pid);
   }
 }
 
 // 2. Nouveau rendu stats avec collapse
 function renderMatchPlayerStatsListV2() {
-  var q = String.fromCharCode(39);
   var pids = Object.keys(_matchPlayerStats);
   if (pids.length === 0) {
     return '<div style="color:var(--muted);font-size:11px;padding:6px 0">Aucun joueur — ajoute des titulaires</div>';
+  }
+  return pids.map(function(pid) {
+    return renderSinglePlayerStatRow(pid);
+  }).join('');
+}
+
+function _renderMatchPlayerStatsListV2_OLD() {
+  var q = String.fromCharCode(39);
+  var pids = Object.keys(_matchPlayerStats);
+  if (pids.length === 0) {
+    return '<div style="color:var(--muted);font-size:11px;padding:6px 0">Aucun joueur</div>';
   }
   return pids.map(function(pid) {
     var stats = _matchPlayerStats[pid];
