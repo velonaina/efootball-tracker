@@ -5222,25 +5222,97 @@ async function confirmDeleteCoach(coachId) {
 // Modal — Ajouter coach
 function renderModalAddCoach() {
   var q = String.fromCharCode(39);
-  return '<div class="modal">' +
+
+  // Grouper la base par tier pour l'affichage
+  var tierLabels = { S: '🥇 S Tier', A: '🥈 A Tier', B: '🥉 B Tier', C: '⚪ C Tier' };
+  var tiers = ['S', 'A', 'B', 'C'];
+  var alreadyNames = State.coaches.map(function(c) { return c.name.toLowerCase(); });
+
+  var dbOptions = '<option value="">— Importer depuis la base —</option>';
+  tiers.forEach(function(tier) {
+    var coaches = EFB_COACHES_DB.filter(function(c) { return c.tier === tier; });
+    if (coaches.length === 0) return;
+    dbOptions += '<optgroup label="' + tierLabels[tier] + '">';
+    coaches.forEach(function(c, i) {
+      var already = alreadyNames.includes(c.name.toLowerCase());
+      var idx = EFB_COACHES_DB.indexOf(c);
+      dbOptions += '<option value="' + idx + '"' + (already ? ' disabled' : '') + '>' +
+        c.name + ' — ' + c.style + (already ? ' ✓' : '') +
+      '</option>';
+    });
+    dbOptions += '</optgroup>';
+  });
+
+  return '<div class="modal modal-lg">' +
     '<div class="modal-header"><h3>Ajouter un coach</h3><button class="btn-icon" onclick="closeModal()"><i class="ti ti-x"></i></button></div>' +
     '<div class="modal-body">' +
-      '<div class="form-group"><label>Nom *</label><input type="text" id="mc-name" class="form-input" placeholder="Ex: Xabi Alonso"></div>' +
-      '<div class="form-row">' +
-        '<div class="form-group"><label>Nationalité</label><input type="text" id="mc-nationality" class="form-input" placeholder="Ex: Espagnol"></div>' +
-        '<div class="form-group"><label>Formation favorite</label><input type="text" id="mc-formation" class="form-input" placeholder="Ex: 4-3-3"></div>' +
-      '</div>' +
-      '<div class="form-group"><label>Style de jeu</label><select id="mc-style" class="form-input">' +
-        '<option value="">— Choisir —</option>' +
-        EFB_COACH_STYLES.map(function(s) { return '<option value="' + s + '">' + s + '</option>'; }).join('') +
-      '</select></div>' +
-      '<div class="form-group"><label>Notes</label><textarea id="mc-notes" class="form-input" rows="2" placeholder="Notes libres..."></textarea></div>' +
+
+    // Import depuis base
+    '<div class="form-group" style="background:var(--surface3);border-radius:8px;padding:10px;margin-bottom:12px">' +
+      '<label style="color:var(--accent)"><i class="ti ti-database"></i> Import depuis la base (' + EFB_COACHES_DB.length + ' coachs)</label>' +
+      '<select id="mc-db-select" class="form-input" style="margin-top:6px" onchange="importCoachFromDB(this.value)">' +
+        dbOptions +
+      '</select>' +
+      '<div style="font-size:10px;color:var(--muted);margin-top:4px">Sélectionne un coach pour remplir automatiquement le formulaire</div>' +
+    '</div>' +
+
+    '<div class="form-group"><label>Nom *</label><input type="text" id="mc-name" class="form-input" placeholder="Ex: Xabi Alonso"></div>' +
+    '<div class="form-row">' +
+      '<div class="form-group"><label>Nationalité</label><input type="text" id="mc-nationality" class="form-input" placeholder="Ex: Espagnol"></div>' +
+      '<div class="form-group"><label>Formation favorite</label><input type="text" id="mc-formation" class="form-input" placeholder="Ex: 4-3-3"></div>' +
+    '</div>' +
+    '<div class="form-group"><label>Style de jeu</label><select id="mc-style" class="form-input">' +
+      '<option value="">— Choisir —</option>' +
+      EFB_COACH_STYLES.map(function(s) { return '<option value="' + s + '">' + s + '</option>'; }).join('') +
+    '</select></div>' +
+    '<div class="form-group"><label>Tier</label><select id="mc-tier" class="form-input">' +
+      '<option value="">— Tier —</option>' +
+      ['S','A','B','C'].map(function(t) { return '<option value="' + t + '">' + tierLabels[t] + '</option>'; }).join('') +
+    '</select></div>' +
+    '<div class="form-group"><label>Notes</label><textarea id="mc-notes" class="form-input" rows="2" placeholder="Boosters, affinity, observations..."></textarea></div>' +
+
     '</div>' +
     '<div class="modal-footer">' +
       '<button class="btn-sm btn-ghost" onclick="closeModal()">Annuler</button>' +
       '<button class="btn-sm btn-primary" onclick="saveCoach()">Ajouter</button>' +
     '</div>' +
   '</div>';
+}
+
+function importCoachFromDB(idxStr) {
+  if (!idxStr && idxStr !== 0) return;
+  var idx = parseInt(idxStr);
+  if (isNaN(idx) || !EFB_COACHES_DB[idx]) return;
+  var c = EFB_COACHES_DB[idx];
+
+  // Remplir le formulaire
+  var fields = {
+    'mc-name': c.name,
+    'mc-nationality': c.nationality || '',
+    'mc-formation': c.formation || '',
+  };
+  Object.entries(fields).forEach(function(entry) {
+    var el = document.getElementById(entry[0]);
+    if (el) el.value = entry[1];
+  });
+
+  // Style
+  var styleEl = document.getElementById('mc-style');
+  if (styleEl) styleEl.value = c.style || '';
+
+  // Tier
+  var tierEl = document.getElementById('mc-tier');
+  if (tierEl) tierEl.value = c.tier || '';
+
+  // Notes auto
+  var notesEl = document.getElementById('mc-notes');
+  if (notesEl) {
+    var parts = [];
+    if (c.boosters && c.boosters.length > 0) parts.push('Boosters: ' + c.boosters.join(', '));
+    if (c.affinity) parts.push('Affinity: ' + c.affinity);
+    if (c.notes) parts.push(c.notes);
+    notesEl.value = parts.join(' | ');
+  }
 }
 
 // Modal — Modifier coach
