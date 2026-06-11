@@ -2517,6 +2517,7 @@ function loadSquad23IntoLineup() {
 // ── État modal match ──────────────────────────────────────────────────────────
 var _matchActiveTab = 'match'; // match | compo | stats | resume
 var _pitchSelectedPid = null;  // joueur sélectionné sur le terrain
+var _pitchSelectedSlot = null; // slot index sélectionné pour échange
 var _pitchSubMode = false;     // mode sélection remplaçant
 var _pitchSubOutPid = null;    // joueur sortant en cours
 
@@ -2600,15 +2601,9 @@ function deleteCustomFormation(name) {
 }
 
 function injectCustomFormation(name, slots) {
-  // Ne pas écraser les formations builtin
+  // Ne pas écraser les formations builtin (sécurité supplémentaire)
   var isBuiltin = FORMATION_LAYOUTS[name] && !FORMATION_LAYOUTS[name]._custom_slots;
-  if (isBuiltin) {
-    // Stocker sous un nom alternatif avec suffixe
-    var altName = name + ' (perso)';
-    FORMATION_LAYOUTS[altName] = { _custom_slots: slots };
-    POSITION_LABELS_BY_FORMATION[altName] = slots.map(function(s) { return s.label || '?'; });
-    return;
-  }
+  if (isBuiltin) return;
   FORMATION_LAYOUTS[name] = { _custom_slots: slots };
   POSITION_LABELS_BY_FORMATION[name] = slots.map(function(s) { return s.label || '?'; });
 }
@@ -2834,7 +2829,7 @@ function renderEditorPitchSVG() {
   var nodes = _fmEditorSlots.map(function(s) {
     var cx = Math.round(s.left / 100 * W);
     var cy = Math.round(s.top / 100 * H);
-    return '<g class="fmeditor-node" data-idx="' + s.idx + '" style="cursor:grab">' +
+    return '<g class="fmeditor-node" data-idx="' + s.idx + '" style="cursor:pointer">' +
       '<circle cx="' + cx + '" cy="' + cy + '" r="16" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>' +
       '<text x="' + cx + '" y="' + (cy+3) + '" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">' + s.label + '</text>' +
       '<text x="' + cx + '" y="' + (cy+16+9) + '" text-anchor="middle" font-size="7" fill="#a0c4ff">' + s.label + '</text>' +
@@ -3040,11 +3035,25 @@ function fmEditorReset() {
 function saveFmEditor() {
   var name = (document.getElementById('fmeditor-name')?.value || '').trim();
   if (!name) { alert('Donne un nom à ta formation'); return; }
+
+  // Vérifier si le nom est une formation builtin
+  var isBuiltin = FORMATION_LAYOUTS[name] && !FORMATION_LAYOUTS[name]._custom_slots;
+  if (isBuiltin) {
+    var inp = document.getElementById('fmeditor-name');
+    if (inp) {
+      inp.style.borderColor = 'var(--red)';
+      inp.placeholder = 'Ce nom est réservé — choisis un autre';
+      inp.value = '';
+      setTimeout(function() { inp.style.borderColor = ''; }, 2000);
+    }
+    alert('Le nom "' + name + '" est une formation standard. Choisis un nom différent (ex: "Mon ' + name + '").');
+    return;
+  }
+
   saveCustomFormation(name, _fmEditorSlots.map(function(s) {
     return { idx: s.idx, label: s.label, left: s.left, top: s.top };
   }));
   closeFmEditor();
-  // Appliquer directement
   selectFormation(name);
 }
 
@@ -3058,6 +3067,7 @@ function renderModalAddMatch(buildId) {
   _matchSubs = [];
   _matchActiveTab = 'match';
   _pitchSelectedPid = null;
+  _pitchSelectedSlot = null;
   _pitchSubMode = false;
   _pitchSubOutPid = null;
   loadSquad23IntoLineup();
@@ -3281,7 +3291,7 @@ function renderPitchSVG(slots, formation) {
   var svgNodes = slots.map(function(slot, i) {
     var titu = _matchTitulaires[i];
     var cx = Math.round(slot.left / 100 * W);
-    var cy = Math.round(slot.top / 100 * H);
+    var cy = Math.round(slot.top  / 100 * H);
 
     // Slot vide — pas encore de joueur assigné
     if (!titu) {
@@ -3299,7 +3309,12 @@ function renderPitchSVG(slots, formation) {
     var origName = origPlayer ? origPlayer.name.split(' ').pop() : '';
     var st = _matchPlayerStats[activePid] || {};
     var hasStats = st.goals > 0 || st.assists > 0 || st.saves > 0 || st.yellow_card || st.red_card || st.rating > 0;
-    var isSelected = _pitchSelectedPid === activePid || _pitchSelectedPid === titu.player_id;
+    var name = player ? player.name.split(' ').pop() : '?';
+    var origName = origPlayer ? origPlayer.name.split(' ').pop() : '';
+    var st = _matchPlayerStats[activePid] || {};
+    var hasStats = st.goals > 0 || st.assists > 0 || st.saves > 0 || st.yellow_card || st.red_card || st.rating > 0;
+    var isSelected = _pitchSelectedSlot === i;
+    var swapMode = _pitchSelectedSlot !== null && _pitchSelectedSlot !== i;
     var r = 14;
 
     // Couleurs
@@ -3307,20 +3322,20 @@ function renderPitchSVG(slots, formation) {
     var stroke = sub ? '#34d399' : (isSelected ? '#f59e0b' : (hasStats ? '#a78bfa' : '#60a5fa'));
     var strokeW = isSelected ? 2.5 : 1.5;
 
-    var nodeHtml = '<g onclick="onPitchPlayerClick(' + q + titu.player_id + q + ',' + q + activePid + q + ')" style="cursor:pointer">';
+    var nodeHtml = '<g class="match-pitch-node" data-slot="' + i + '" onclick="onPitchPlayerClick(' + q + titu.player_id + q + ',' + q + activePid + q + ',' + i + ')" style="cursor:pointer">';
+    if (swapMode) {
+      nodeHtml += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r+4) + '" fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2" opacity="0.6"/>';
+    }
     nodeHtml += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>';
+    if (isSelected) {
+      nodeHtml += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r+3) + '" fill="none" stroke="#f59e0b" stroke-width="1.5" opacity="0.7"/>';
+    }
 
     // Badge stats
     var statCount = (st.goals || 0) + (st.assists || 0);
     if (statCount > 0) {
       nodeHtml += '<circle cx="' + (cx+10) + '" cy="' + (cy-10) + '" r="6" fill="#a78bfa"/>';
       nodeHtml += '<text x="' + (cx+10) + '" y="' + (cy-7) + '" text-anchor="middle" font-size="7" font-weight="700" fill="#fff">' + statCount + '</text>';
-    }
-    if (st.yellow_card) {
-      nodeHtml += '<rect x="' + (cx-4) + '" y="' + (cy-r-6) + '" width="8" height="5" rx="1" fill="#f59e0b"/>';
-    }
-    if (st.red_card) {
-      nodeHtml += '<rect x="' + (cx+1) + '" y="' + (cy-r-6) + '" width="8" height="5" rx="1" fill="#f87171"/>';
     }
 
     // Label position
@@ -3392,14 +3407,40 @@ function renderPitchSVG(slots, formation) {
 }
 
 // ── Clic sur un joueur du terrain ─────────────────────────────────────────────
-function onPitchPlayerClick(origPid, activePid) {
+function onPitchPlayerClick(origPid, activePid, slotIdx) {
   if (_pitchSubMode) {
     if (_pitchSubOutPid !== origPid) {
       _pitchSubOutPid = origPid;
     }
     return;
   }
-  _pitchSelectedPid = (_pitchSelectedPid === activePid || _pitchSelectedPid === origPid) ? null : activePid;
+
+  // Si un slot est déjà sélectionné et qu'on clique sur un autre → échanger
+  if (_pitchSelectedSlot !== null && _pitchSelectedSlot !== slotIdx) {
+    // Échanger les titulaires des deux slots
+    var slotA = _pitchSelectedSlot;
+    var slotB = slotIdx;
+    var tmp = _matchTitulaires[slotA];
+    _matchTitulaires[slotA] = _matchTitulaires[slotB];
+    _matchTitulaires[slotB] = tmp;
+    // Échanger aussi les subs associées
+    _matchSubs.forEach(function(s) {
+      if (s.out_player_id === (_matchTitulaires[slotB] ? _matchTitulaires[slotB].player_id : null)) return;
+    });
+    _pitchSelectedSlot = null;
+    _pitchSelectedPid = null;
+    refreshPitchStats();
+    return;
+  }
+
+  // Sélectionner ou désélectionner
+  if (_pitchSelectedSlot === slotIdx) {
+    _pitchSelectedSlot = null;
+    _pitchSelectedPid = null;
+  } else {
+    _pitchSelectedSlot = slotIdx;
+    _pitchSelectedPid = activePid;
+  }
 
   // Mettre à jour le panneau stats directement
   var statsCol = document.getElementById('pitch-stats-col');
@@ -3416,13 +3457,13 @@ function onPitchPlayerClick(origPid, activePid) {
     label.innerHTML = '<i class="ti ti-user"></i> <span>Clique un joueur sur le terrain</span>';
   }
 
-  // Scroll vers le panel pour s'assurer qu'il est visible
+  // Scroll vers le panel
   var panel = document.querySelector('.match-player-panel-fixed');
   if (panel && _pitchSelectedPid) {
     panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  // Re-render le terrain pour mettre à jour la surbrillance
+  // Re-render terrain pour surbrillance
   var formationVal = _matchLastFormation || '';
   var fEl = document.getElementById('m-formation');
   if (fEl && fEl.value) formationVal = fEl.value;
@@ -3516,6 +3557,7 @@ function refreshPitchStats() {
         '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="border-color:#34d399"></span>Remplacé</span>' +
         '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="background:#2d1f4e;border-color:#a78bfa"></span>Stats</span>' +
       '</div>';
+    setTimeout(bindMatchPitchDrag, 40);
   }
 
   // Re-render panneau stats droite
@@ -3624,6 +3666,18 @@ function renderPitchPlayerCard(pid, isSub, subMinute) {
   if (alreadySub) {
     html += '<button class="btn-sm btn-ghost ppc-sub-btn" style="color:var(--red)" onclick="cancelSub(' + q + pid + q + ')"><i class="ti ti-x"></i> Annuler</button>';
   }
+  // Bouton changer de rôle — toujours disponible
+  var slotIdx = _matchTitulaires.findIndex(function(t) {
+    if (!t) return false;
+    var sub = _matchSubs.find(function(s) { return s.out_player_id === t.player_id; });
+    var activePid = sub ? sub.in_player_id : t.player_id;
+    return activePid === pid || t.player_id === pid;
+  });
+  if (slotIdx >= 0) {
+    var slots = _matchLastFormation ? buildPitchSlots(_matchLastFormation) : null;
+    var currentRole = slots && slots[slotIdx] ? (POSITION_LABELS_BY_FORMATION[_matchLastFormation] ? POSITION_LABELS_BY_FORMATION[_matchLastFormation][slotIdx] : slots[slotIdx].label) : '?';
+    html += '<button class="btn-sm btn-ghost ppc-sub-btn" onclick="openRolePicker(' + slotIdx + ',this)" style="font-size:10px"><i class="ti ti-tag"></i> ' + currentRole + '</button>';
+  }
   html += '</div>';
 
   // Stats
@@ -3693,6 +3747,51 @@ function matchHDividerEnd() {
   if (divider) divider.classList.remove('dragging');
   document.removeEventListener('mousemove', matchHDividerMove);
   document.removeEventListener('mouseup', matchHDividerEnd);
+}
+
+// ── Drag & drop rôle joueur dans modal match ──────────────────────────────────
+// ── Changer de rôle depuis la fiche joueur ────────────────────────────────────
+var ALL_POSITIONS = ['GK','CB','LB','RB','DMF','CMF','AMF','LMF','RMF','LWF','RWF','SS','CF'];
+
+function openRolePicker(slotIdx, btn) {
+  // Supprimer picker existant
+  var existing = document.getElementById('role-picker');
+  if (existing) { existing.remove(); return; }
+
+  var rect = btn.getBoundingClientRect();
+  var picker = document.createElement('div');
+  picker.id = 'role-picker';
+  picker.style.cssText = 'position:fixed;z-index:500;background:var(--surface);border:0.5px solid var(--accent);border-radius:8px;padding:6px;display:flex;flex-wrap:wrap;gap:4px;box-shadow:0 4px 20px rgba(0,0,0,0.6);max-width:200px;';
+  picker.style.left = Math.min(rect.left, window.innerWidth - 210) + 'px';
+  picker.style.top  = (rect.bottom + 4) + 'px';
+
+  ALL_POSITIONS.forEach(function(pos) {
+    var b = document.createElement('button');
+    b.textContent = pos;
+    b.style.cssText = 'padding:4px 10px;border-radius:5px;border:0.5px solid var(--border);background:var(--surface3);color:var(--text);font-size:11px;font-weight:600;cursor:pointer;';
+    b.onmouseenter = function() { b.style.background = 'var(--accent)'; b.style.color = '#fff'; };
+    b.onmouseleave = function() { b.style.background = 'var(--surface3)'; b.style.color = 'var(--text)'; };
+    b.onclick = function() {
+      // Mettre à jour le label
+      var labels = POSITION_LABELS_BY_FORMATION[_matchLastFormation];
+      if (labels && labels[slotIdx] !== undefined) {
+        labels[slotIdx] = pos;
+      }
+      picker.remove();
+      refreshPitchStats();
+    };
+    picker.appendChild(b);
+  });
+
+  document.body.appendChild(picker);
+  setTimeout(function() {
+    document.addEventListener('mousedown', function close(e) {
+      if (!picker.contains(e.target) && e.target !== btn) {
+        picker.remove();
+        document.removeEventListener('mousedown', close);
+      }
+    });
+  }, 100);
 }
 
 // ── Redimensionnement modal match ─────────────────────────────────────────────
