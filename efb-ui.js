@@ -8,10 +8,11 @@ const State = {
   cards: {},       // { playerId: [cards] }
   builds: {},      // { cardId: [builds] }
   matches: [],
+  coaches: [],
   selectedPlayerId: null,
   selectedCardId: null,
   selectedBuildId: null,
-  activeTab: 'effectif', // effectif | formation | analyse | matchs
+  activeTab: 'effectif', // effectif | formation | analyse | matchs | coachs
   activePlayerTab: 'stats', // stats | builds | matchs
   loading: false,
   search: {
@@ -28,6 +29,7 @@ async function init() {
   try {
     State.players = await Players.getAll();
     State.matches = await Matches.getAll();
+    State.coaches = await Coaches.getAll();
     // Charger les cartes de TOUS les joueurs
     const allCards = await Cards.getAll();
     allCards.forEach(c => {
@@ -91,6 +93,7 @@ function render() {
       ${State.activeTab === 'formation' ? renderFormationTab() : ''}
       ${State.activeTab === 'analyse'   ? renderAnalyse() : ''}
       ${State.activeTab === 'matchs'    ? renderMatchsGlobal() : ''}
+      ${State.activeTab === 'coachs'    ? renderCoachs() : ''}
     </div>
     ${renderModals()}
   `;
@@ -131,6 +134,7 @@ function renderNav() {
     { id: 'formation', label: 'Formation', icon: 'ti-layout-soccer-field' },
     { id: 'analyse',   label: 'Analyse',   icon: 'ti-chart-bar' },
     { id: 'matchs',    label: 'Matchs',    icon: 'ti-ball-football' },
+    { id: 'coachs',    label: 'Coachs',    icon: 'ti-whistle' },
   ];
   return `
     <nav class="main-nav">
@@ -1905,6 +1909,7 @@ function renderAnalyse() {
   const byPlayer = Analyse.byPlayer(matches);
   const byForm   = Analyse.byFormation(matches);
   const byType   = Analyse.byMatchType(matches);
+  const byCoach  = Analyse.byCoach(matches);
   const bestXI   = Analyse.bestXI(matches);
 
   const MATCH_TYPE_LABELS = {
@@ -1994,6 +1999,28 @@ function renderAnalyse() {
             ${winBar(f.wins, f.draws, f.losses, f.total)}
             <span class="an-row-pct">${f.winRate}%</span>
             <span class="an-row-sub">${f.total}J · ${f.goalsFor} buts</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  // ── Par coach ──
+  const byCoachHtml = byCoach.filter(c => c.coach_id).length === 0 ? '' : `
+    <div class="an-section">
+      <div class="an-section-title"><i class="ti ti-whistle"></i> Performance par coach</div>
+      <div class="an-table">
+        ${byCoach.filter(c => c.coach_id).map(c => `
+          <div class="an-row an-row-build">
+            <div class="an-row-build-info">
+              <span class="an-row-label">${c.name}</span>
+              <span class="an-row-sub">${[c.style, c.formation].filter(Boolean).join(' · ') || '—'}</span>
+            </div>
+            ${winBar(c.wins, c.draws, c.losses, c.total)}
+            <span class="an-row-pct">${c.winRate}%</span>
+            <div class="an-row-build-stats">
+              <span title="Matchs">${c.total}J</span>
+              <span title="Série record" style="color:var(--accent)">⚡${c.serie.record}</span>
+              <span title="Série actuelle" style="color:#34d399">→${c.serie.current}</span>
+            </div>
           </div>`).join('')}
       </div>
     </div>`;
@@ -2102,6 +2129,7 @@ function renderAnalyse() {
       ${byTypeHtml}
       ${byRankHtml}
       ${byFormHtml}
+      ${byCoachHtml}
       ${byBuildHtml}
       ${bestXIHtml}
       ${topPlayersHtml}
@@ -2183,6 +2211,8 @@ function openModal(type, id) {
     setTimeout(applyLastInstructions, 80);
   }
   if (type === 'editMatch')  container.innerHTML = renderModalEditMatch(id);
+  if (type === 'addCoach')   container.innerHTML = renderModalAddCoach();
+  if (type === 'editCoach')  container.innerHTML = renderModalEditCoach(id);
 }
 
 function closeModal() {
@@ -3197,6 +3227,14 @@ function renderMatchTabMain() {
     '<div class="mic-row">' +
       '<div class="form-group" style="flex:1"><label>Mon rang pts</label><input type="number" id="m-my-rank" class="form-input form-input-sm" placeholder="1250"></div>' +
       '<div class="form-group" style="flex:1"><label>Rang adv. pts</label><input type="number" id="m-opp-rank" class="form-input form-input-sm" placeholder="1380"></div>' +
+    '</div>' +
+    '<div class="mic-row">' +
+      '<div class="form-group" style="flex:2"><label><i class="ti ti-whistle" style="font-size:11px"></i> Coach utilisé</label><select id="m-coach-id" class="form-input form-input-sm">' +
+        '<option value="">— Sans coach —</option>' +
+        State.coaches.map(function(c) {
+          return '<option value="' + c.id + '">' + c.name + (c.style ? ' · ' + c.style : '') + (c.formation ? ' (' + c.formation + ')' : '') + '</option>';
+        }).join('') +
+      '</select></div>' +
     '</div>' +
     '<div class="mic-row">' +
       '<div class="form-group" style="flex:1"><label>Date</label><input type="date" id="m-match-date-vis" class="form-input form-input-sm" value="' + new Date().toISOString().split('T')[0] + '" oninput="document.getElementById(' + q + 'm-match-date' + q + ').value=this.value"></div>' +
@@ -4459,6 +4497,7 @@ async function saveMatch() {
 
   const data = {
     build_id: null, // Retiré — build_id est maintenant par joueur dans player_stats
+    coach_id: document.getElementById('m-coach-id')?.value || null,
     result,
     match_date: document.getElementById('m-match-date')?.value || null,
     match_time: document.getElementById('m-match-time')?.value || null,
@@ -5069,6 +5108,198 @@ async function saveEditMatch(matchId) {
   try {
     await Matches.update(matchId, data);
     State.matches = await Matches.getAll();
+    closeModal();
+    render();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ONGLET COACHS
+// ══════════════════════════════════════════════════════════════════════════════
+
+// localStorage key pour le coach actif
+var COACH_STORAGE_KEY = 'efb_active_coach';
+
+function getActiveCoachId() {
+  try { return localStorage.getItem(COACH_STORAGE_KEY) || null; } catch(e) { return null; }
+}
+
+function setActiveCoachId(id) {
+  try { if (id) localStorage.setItem(COACH_STORAGE_KEY, id); else localStorage.removeItem(COACH_STORAGE_KEY); } catch(e) {}
+}
+
+function renderCoachs() {
+  var q = String.fromCharCode(39);
+  var activeCoachId = getActiveCoachId();
+  var coaches = State.coaches;
+
+  var html = '<div class="coachs-page">';
+  html += '<div class="coachs-header">';
+  html += '<span class="coachs-title"><i class="ti ti-whistle"></i> Coachs (' + coaches.length + ')</span>';
+  html += '<button class="btn-sm btn-primary" onclick="openModal(' + q + 'addCoach' + q + ')"><i class="ti ti-plus"></i> Ajouter</button>';
+  html += '</div>';
+
+  if (coaches.length === 0) {
+    html += '<div class="empty-state"><i class="ti ti-whistle" style="font-size:36px;color:var(--border)"></i><p>Aucun coach enregistré</p><button class="btn-sm btn-primary" onclick="openModal(' + q + 'addCoach' + q + ')">+ Ajouter un coach</button></div>';
+  } else {
+    html += '<div class="coachs-list">';
+    coaches.forEach(function(c) {
+      var isActive = c.id === activeCoachId;
+      var matchCount = State.matches.filter(function(m) { return m.coach_id === c.id; }).length;
+      var coachMatches = State.matches.filter(function(m) { return m.coach_id === c.id; });
+      var stats = Analyse.globalStats(coachMatches);
+      var serie = Analyse.series(coachMatches);
+
+      html += '<div class="coach-card' + (isActive ? ' coach-active' : '') + '">';
+      html += '<div class="coach-card-header">';
+      html += '<div class="coach-card-left">';
+      html += '<div class="coach-name">' + c.name + (isActive ? ' <span class="badge-active">Actif</span>' : '') + '</div>';
+      html += '<div class="coach-meta">';
+      if (c.nationality) html += '<span class="coach-meta-item"><i class="ti ti-flag"></i> ' + c.nationality + '</span>';
+      if (c.style)       html += '<span class="coach-meta-item"><i class="ti ti-run"></i> ' + c.style + '</span>';
+      if (c.formation)   html += '<span class="coach-meta-item"><i class="ti ti-layout-soccer-field"></i> ' + c.formation + '</span>';
+      html += '</div>';
+      if (c.notes) html += '<div class="coach-notes">' + c.notes + '</div>';
+      html += '</div>';
+      html += '<div class="coach-card-actions">';
+      html += '<button class="btn-sm ' + (isActive ? 'btn-ghost' : 'btn-primary') + '" onclick="toggleActiveCoach(' + q + c.id + q + ')">' + (isActive ? '<i class="ti ti-check"></i> Actif' : '<i class="ti ti-star"></i> Activer') + '</button>';
+      html += '<button class="btn-icon" onclick="openModal(' + q + 'editCoach' + q + ',' + q + c.id + q + ')"><i class="ti ti-pencil"></i></button>';
+      html += '<button class="btn-icon danger" onclick="confirmDeleteCoach(' + q + c.id + q + ')"><i class="ti ti-trash"></i></button>';
+      html += '</div>';
+      html += '</div>';
+
+      // Stats
+      if (matchCount > 0) {
+        html += '<div class="coach-stats">';
+        html += '<span class="coach-stat">' + stats.total + ' matchs</span>';
+        html += '<span class="coach-stat win">' + stats.winRate + '% victoires</span>';
+        html += '<span class="coach-stat">' + stats.goalsFor + ' buts</span>';
+        html += '<span class="coach-stat serie">⚡ Série record: ' + serie.record + '</span>';
+        if (serie.current > 0) html += '<span class="coach-stat serie-current">→ Actuelle: ' + serie.current + '</span>';
+        html += '</div>';
+        // Barre victoires
+        html += '<div class="an-bar-wrap" style="margin:4px 0 0">';
+        html += '<div class="an-seg-w" style="width:' + (stats.wins/stats.total*100) + '%"></div>';
+        html += '<div class="an-seg-d" style="width:' + (stats.draws/stats.total*100) + '%"></div>';
+        html += '<div class="an-seg-l" style="width:' + (stats.losses/stats.total*100) + '%"></div>';
+        html += '</div>';
+      } else {
+        html += '<div style="font-size:11px;color:var(--muted);padding:6px 0">Aucun match avec ce coach</div>';
+      }
+
+      html += '</div>'; // coach-card
+    });
+    html += '</div>'; // coachs-list
+  }
+
+  html += '</div>'; // coachs-page
+  return html;
+}
+
+function toggleActiveCoach(coachId) {
+  var current = getActiveCoachId();
+  if (current === coachId) {
+    setActiveCoachId(null);
+  } else {
+    setActiveCoachId(coachId);
+  }
+  // Rafraîchir l'onglet
+  var el = document.querySelector('.coachs-page');
+  if (el) el.outerHTML = renderCoachs();
+  else render();
+}
+
+async function confirmDeleteCoach(coachId) {
+  if (!confirm('Supprimer ce coach ?')) return;
+  try {
+    await Coaches.delete(coachId);
+    State.coaches = await Coaches.getAll();
+    if (getActiveCoachId() === coachId) setActiveCoachId(null);
+    render();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+// Modal — Ajouter coach
+function renderModalAddCoach() {
+  var q = String.fromCharCode(39);
+  return '<div class="modal">' +
+    '<div class="modal-header"><h3>Ajouter un coach</h3><button class="btn-icon" onclick="closeModal()"><i class="ti ti-x"></i></button></div>' +
+    '<div class="modal-body">' +
+      '<div class="form-group"><label>Nom *</label><input type="text" id="mc-name" class="form-input" placeholder="Ex: Xabi Alonso"></div>' +
+      '<div class="form-row">' +
+        '<div class="form-group"><label>Nationalité</label><input type="text" id="mc-nationality" class="form-input" placeholder="Ex: Espagnol"></div>' +
+        '<div class="form-group"><label>Formation favorite</label><input type="text" id="mc-formation" class="form-input" placeholder="Ex: 4-3-3"></div>' +
+      '</div>' +
+      '<div class="form-group"><label>Style de jeu</label><select id="mc-style" class="form-input">' +
+        '<option value="">— Choisir —</option>' +
+        EFB_COACH_STYLES.map(function(s) { return '<option value="' + s + '">' + s + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="form-group"><label>Notes</label><textarea id="mc-notes" class="form-input" rows="2" placeholder="Notes libres..."></textarea></div>' +
+    '</div>' +
+    '<div class="modal-footer">' +
+      '<button class="btn-sm btn-ghost" onclick="closeModal()">Annuler</button>' +
+      '<button class="btn-sm btn-primary" onclick="saveCoach()">Ajouter</button>' +
+    '</div>' +
+  '</div>';
+}
+
+// Modal — Modifier coach
+function renderModalEditCoach(coachId) {
+  var c = State.coaches.find(function(x) { return x.id === coachId; });
+  if (!c) return '';
+  var q = String.fromCharCode(39);
+  return '<div class="modal">' +
+    '<div class="modal-header"><h3>Modifier ' + c.name + '</h3><button class="btn-icon" onclick="closeModal()"><i class="ti ti-x"></i></button></div>' +
+    '<div class="modal-body">' +
+      '<div class="form-group"><label>Nom *</label><input type="text" id="mc-name" class="form-input" value="' + (c.name || '') + '"></div>' +
+      '<div class="form-row">' +
+        '<div class="form-group"><label>Nationalité</label><input type="text" id="mc-nationality" class="form-input" value="' + (c.nationality || '') + '"></div>' +
+        '<div class="form-group"><label>Formation favorite</label><input type="text" id="mc-formation" class="form-input" value="' + (c.formation || '') + '"></div>' +
+      '</div>' +
+      '<div class="form-group"><label>Style de jeu</label><select id="mc-style" class="form-input">' +
+        '<option value="">— Choisir —</option>' +
+        EFB_COACH_STYLES.map(function(s) { return '<option value="' + s + '"' + (c.style === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="form-group"><label>Notes</label><textarea id="mc-notes" class="form-input" rows="2">' + (c.notes || '') + '</textarea></div>' +
+    '</div>' +
+    '<div class="modal-footer">' +
+      '<button class="btn-sm btn-ghost" onclick="closeModal()">Annuler</button>' +
+      '<button class="btn-sm btn-primary" onclick="updateCoach(' + q + coachId + q + ')">Sauvegarder</button>' +
+    '</div>' +
+  '</div>';
+}
+
+async function saveCoach() {
+  var name = document.getElementById('mc-name')?.value?.trim();
+  if (!name) { alert('Le nom est obligatoire'); return; }
+  var data = {
+    name: name,
+    nationality: document.getElementById('mc-nationality')?.value?.trim() || null,
+    formation: document.getElementById('mc-formation')?.value?.trim() || null,
+    style: document.getElementById('mc-style')?.value || null,
+    notes: document.getElementById('mc-notes')?.value?.trim() || null,
+  };
+  try {
+    await Coaches.create(data);
+    State.coaches = await Coaches.getAll();
+    closeModal();
+    render();
+  } catch(e) { alert('Erreur : ' + e.message); }
+}
+
+async function updateCoach(coachId) {
+  var name = document.getElementById('mc-name')?.value?.trim();
+  if (!name) { alert('Le nom est obligatoire'); return; }
+  var data = {
+    name: name,
+    nationality: document.getElementById('mc-nationality')?.value?.trim() || null,
+    formation: document.getElementById('mc-formation')?.value?.trim() || null,
+    style: document.getElementById('mc-style')?.value || null,
+    notes: document.getElementById('mc-notes')?.value?.trim() || null,
+  };
+  try {
+    await Coaches.update(coachId, data);
+    State.coaches = await Coaches.getAll();
     closeModal();
     render();
   } catch(e) { alert('Erreur : ' + e.message); }
