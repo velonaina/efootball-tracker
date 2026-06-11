@@ -244,6 +244,112 @@ const Analyse = {
       serie: this.series(ms),
     }));
   },
+
+  // Stats par build (depuis player_stats de chaque match)
+  byBuild(matches) {
+    const builds = {};
+    matches.forEach(m => {
+      const ps = m.player_stats || [];
+      ps.forEach(p => {
+        if (!p.build_id) return;
+        if (!builds[p.build_id]) builds[p.build_id] = { matchIds: new Set(), goals: 0, assists: 0, ratings: [], saves: 0 };
+        builds[p.build_id].matchIds.add(m.id);
+        builds[p.build_id].goals   += p.goals   || 0;
+        builds[p.build_id].assists += p.assists  || 0;
+        builds[p.build_id].saves   += p.saves    || 0;
+        if (p.rating > 0) builds[p.build_id].ratings.push(p.rating);
+      });
+    });
+    return Object.entries(builds).map(([bid, data]) => {
+      const ms = matches.filter(m => data.matchIds.has(m.id));
+      const stats = this.globalStats(ms);
+      const avgRating = data.ratings.length > 0
+        ? Math.round(data.ratings.reduce((a,b) => a+b, 0) / data.ratings.length * 10) / 10
+        : 0;
+      return { build_id: bid, matchCount: data.matchIds.size, goals: data.goals, assists: data.assists, saves: data.saves, avgRating, ...stats };
+    }).sort((a, b) => b.winRate - a.winRate);
+  },
+
+  // Stats par joueur (depuis player_stats)
+  byPlayer(matches) {
+    const players = {};
+    matches.forEach(m => {
+      const ps = m.player_stats || [];
+      ps.forEach(p => {
+        if (!p.player_id) return;
+        if (!players[p.player_id]) players[p.player_id] = { matchCount: 0, goals: 0, assists: 0, saves: 0, ratings: [], yellowCards: 0, redCards: 0 };
+        players[p.player_id].matchCount++;
+        players[p.player_id].goals       += p.goals   || 0;
+        players[p.player_id].assists     += p.assists  || 0;
+        players[p.player_id].saves       += p.saves    || 0;
+        players[p.player_id].yellowCards += p.yellow_card ? 1 : 0;
+        players[p.player_id].redCards    += p.red_card   ? 1 : 0;
+        if (p.rating > 0) players[p.player_id].ratings.push(p.rating);
+      });
+    });
+    return Object.entries(players).map(([pid, data]) => {
+      const avgRating = data.ratings.length > 0
+        ? Math.round(data.ratings.reduce((a,b) => a+b, 0) / data.ratings.length * 10) / 10
+        : 0;
+      return { player_id: pid, ...data, avgRating };
+    }).sort((a, b) => b.goals - a.goals);
+  },
+
+  // Stats par formation
+  byFormation(matches) {
+    const formations = {};
+    matches.forEach(m => {
+      const f = m.formation || 'Inconnue';
+      if (!formations[f]) formations[f] = [];
+      formations[f].push(m);
+    });
+    return Object.entries(formations).map(([formation, ms]) => ({
+      formation,
+      ...this.globalStats(ms),
+    })).sort((a, b) => b.winRate - a.winRate);
+  },
+
+  // Stats par type de match
+  byMatchType(matches) {
+    const types = {};
+    matches.forEach(m => {
+      const t = m.match_type || 'Inconnu';
+      if (!types[t]) types[t] = [];
+      types[t].push(m);
+    });
+    return Object.entries(types).map(([type, ms]) => ({
+      match_type: type,
+      ...this.globalStats(ms),
+    })).sort((a, b) => b.total - a.total);
+  },
+
+  // Meilleur XI — joueurs avec le meilleur taux de victoire (min 3 matchs)
+  bestXI(matches) {
+    const byPlayer = this.byPlayer(matches);
+    const playerWins = {};
+    matches.forEach(m => {
+      const ps = m.player_stats || [];
+      ps.forEach(p => {
+        if (!p.player_id) return;
+        if (!playerWins[p.player_id]) playerWins[p.player_id] = { wins: 0, total: 0 };
+        playerWins[p.player_id].total++;
+        if (m.result === 'V') playerWins[p.player_id].wins++;
+      });
+    });
+    return Object.entries(playerWins)
+      .filter(([pid, d]) => d.total >= 3)
+      .map(([pid, d]) => ({
+        player_id: pid,
+        winRate: Math.round(d.wins / d.total * 100),
+        matchCount: d.total,
+        wins: d.wins,
+        goals:   (byPlayer.find(p => p.player_id === pid) || {}).goals   || 0,
+        assists: (byPlayer.find(p => p.player_id === pid) || {}).assists || 0,
+        avgRating: (byPlayer.find(p => p.player_id === pid) || {}).avgRating || 0,
+      }))
+      .sort((a, b) => b.winRate - a.winRate)
+      .slice(0, 11);
+  },
 };
 
 // ── CONSTANTES JEUX ───────────────────────────────────────────────────────────

@@ -11,23 +11,37 @@ const State = {
   selectedPlayerId: null,
   selectedCardId: null,
   selectedBuildId: null,
-  activeTab: 'effectif', // effectif | analyse | matchs
+  activeTab: 'effectif', // effectif | formation | analyse | matchs
   activePlayerTab: 'stats', // stats | builds | matchs
   loading: false,
+  search: {
+    open: false,
+    query: '',
+    results: { players: [], builds: [], matches: [] },
+  },
 };
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
   renderSkeleton();
+  loadAllCustomFormations();
   try {
     State.players = await Players.getAll();
     State.matches = await Matches.getAll();
-    // Charger les cartes de TOUS les joueurs pour la sidebar
+    // Charger les cartes de TOUS les joueurs
     const allCards = await Cards.getAll();
     allCards.forEach(c => {
       if (!State.cards[c.player_id]) State.cards[c.player_id] = [];
       if (!State.cards[c.player_id].find(x => x.id === c.id)) {
         State.cards[c.player_id].push(c);
+      }
+    });
+    // Charger les builds de TOUS les joueurs
+    const allBuilds = await Builds.getAll();
+    allBuilds.forEach(b => {
+      if (!State.builds[b.card_id]) State.builds[b.card_id] = [];
+      if (!State.builds[b.card_id].find(x => x.id === b.id)) {
+        State.builds[b.card_id].push(b);
       }
     });
     // Sélectionner le premier joueur
@@ -73,9 +87,10 @@ function render() {
     ${renderTopbar()}
     ${renderNav()}
     <div class="app-body">
-      ${State.activeTab === 'effectif' ? renderEffectif() : ''}
-      ${State.activeTab === 'analyse'  ? renderAnalyse() : ''}
-      ${State.activeTab === 'matchs'   ? renderMatchsGlobal() : ''}
+      ${State.activeTab === 'effectif'  ? renderEffectif() : ''}
+      ${State.activeTab === 'formation' ? renderFormationTab() : ''}
+      ${State.activeTab === 'analyse'   ? renderAnalyse() : ''}
+      ${State.activeTab === 'matchs'    ? renderMatchsGlobal() : ''}
     </div>
     ${renderModals()}
   `;
@@ -90,17 +105,32 @@ function renderTopbar() {
         <span class="topbar-logo">⚽</span>
         <span class="topbar-title">eFootball Tracker</span>
       </div>
+      <div class="topbar-search-wrap">
+        <i class="ti ti-search topbar-search-icon"></i>
+        <input
+          type="text"
+          class="topbar-search-input"
+          placeholder="Rechercher joueur, build, match…"
+          value="${State.search.query}"
+          onclick="openSearchOverlay()"
+          onkeydown="if(event.key==='Enter'||event.key==='ArrowDown'){openSearchOverlay();}"
+          readonly
+        >
+        ${State.search.query ? `<button class="topbar-search-clear" onclick="clearSearch(event)"><i class="ti ti-x"></i></button>` : ''}
+      </div>
       <span class="topbar-squad">Real Madrid</span>
     </header>
+    ${State.search.open ? renderSearchOverlay() : ''}
   `;
 }
 
 // ── Navigation ────────────────────────────────────────────────────────────────
 function renderNav() {
   const tabs = [
-    { id: 'effectif', label: 'Effectif', icon: 'ti-users' },
-    { id: 'analyse',  label: 'Analyse',  icon: 'ti-chart-bar' },
-    { id: 'matchs',   label: 'Matchs',   icon: 'ti-ball-football' },
+    { id: 'effectif',  label: 'Effectif',  icon: 'ti-users' },
+    { id: 'formation', label: 'Formation', icon: 'ti-layout-soccer-field' },
+    { id: 'analyse',   label: 'Analyse',   icon: 'ti-chart-bar' },
+    { id: 'matchs',    label: 'Matchs',    icon: 'ti-ball-football' },
   ];
   return `
     <nav class="main-nav">
@@ -113,6 +143,1089 @@ function renderNav() {
       `).join('')}
     </nav>
   `;
+}
+
+// ── Recherche globale ─────────────────────────────────────────────────────────
+function openSearchOverlay() {
+  State.search.open = true;
+  render();
+  setTimeout(function() {
+    var inp = document.getElementById('search-panel-input');
+    if (inp) inp.focus();
+  }, 30);
+}
+
+function closeSearchOverlay() {
+  State.search.open = false;
+  render();
+}
+
+function clearSearch(e) {
+  if (e) e.stopPropagation();
+  State.search.query = '';
+  State.search.results = { players: [], builds: [], matches: [] };
+  State.search.open = false;
+  render();
+}
+
+function onSearchInput(val) {
+  State.search.query = val;
+  if (!val.trim()) {
+    State.search.results = { players: [], builds: [], matches: [] };
+    renderSearchResults();
+    return;
+  }
+  var q = val.toLowerCase().trim();
+  // Joueurs
+  var players = State.players.filter(function(p) {
+    var cards = State.cards[p.id] || [];
+    var card = cards[0];
+    return (
+      (p.name || '').toLowerCase().includes(q) ||
+      (card && (card.playing_style || '').toLowerCase().includes(q)) ||
+      (card && (card.card_type || '').toLowerCase().includes(q))
+    );
+  });
+  // Builds
+  var builds = [];
+  Object.values(State.builds).forEach(function(arr) {
+    arr.forEach(function(b) {
+      var playerName = '';
+      // Chercher le nom du joueur via la carte
+      Object.entries(State.cards).forEach(function(entry) {
+        var pid = entry[0]; var pcards = entry[1];
+        if (pcards.find(function(c) { return c.id === b.card_id; })) {
+          var p = State.players.find(function(pl) { return pl.id === pid; });
+          if (p) playerName = p.name;
+        }
+      });
+      if (
+        (b.name || '').toLowerCase().includes(q) ||
+        playerName.toLowerCase().includes(q)
+      ) {
+        builds.push({ build: b, playerName: playerName });
+      }
+    });
+  });
+  // Matchs
+  var matches = State.matches.filter(function(m) {
+    var dateStr = m.match_date || (m.played_at ? m.played_at.slice(0,10) : '');
+    var resultLabel = m.result === 'V' ? 'victoire' : m.result === 'N' ? 'nul' : 'défaite';
+    return (
+      (m.opp_name || '').toLowerCase().includes(q) ||
+      (m.rank || '').toLowerCase().includes(q) ||
+      dateStr.includes(q) ||
+      resultLabel.includes(q)
+    );
+  });
+  State.search.results = { players: players, builds: builds, matches: matches };
+  renderSearchResults();
+}
+
+function renderSearchResults() {
+  var container = document.getElementById('search-results-body');
+  if (!container) return;
+  container.innerHTML = buildSearchResultsHTML();
+}
+
+function buildSearchResultsHTML() {
+  var q = State.search.query.trim();
+  if (!q) {
+    return '<div class="search-hint">Tapez pour rechercher parmi vos joueurs,<br>builds et matchs enregistrés.</div>';
+  }
+  var r = State.search.results;
+  var total = r.players.length + r.builds.length + r.matches.length;
+  if (total === 0) {
+    return '<div class="search-empty"><i class="ti ti-mood-empty" style="font-size:24px;margin-bottom:8px;display:block"></i>Aucun résultat pour "<strong>' + q + '</strong>"</div>';
+  }
+  var html = '';
+  if (r.players.length > 0) {
+    html += '<div class="search-group"><div class="search-group-title"><i class="ti ti-users" style="margin-right:4px"></i>Joueurs</div>';
+    r.players.forEach(function(p) {
+      var cards = State.cards[p.id] || [];
+      var card = cards[0];
+      var sub = card ? [(card.playing_style || ''), (card.card_type || '')].filter(Boolean).join(' · ') : 'Aucune carte';
+      var q2 = String.fromCharCode(39);
+      html += '<div class="search-result-item" onclick="navigateToPlayer(' + q2 + p.id + q2 + ')">' +
+        '<div class="search-result-icon player"><i class="ti ti-user"></i></div>' +
+        '<div class="search-result-body">' +
+          '<div class="search-result-name">' + p.name + '</div>' +
+          '<div class="search-result-sub">' + sub + '</div>' +
+        '</div>' +
+        (card ? '<span class="search-result-badge ' + (card.card_type === 'Trending' ? 'loss' : card.card_type === 'Epic' ? 'draw' : 'win') + '">' + (card.card_type || '—') + '</span>' : '') +
+      '</div>';
+    });
+    html += '</div>';
+  }
+  if (r.builds.length > 0) {
+    html += '<div class="search-group"><div class="search-group-title"><i class="ti ti-adjustments" style="margin-right:4px"></i>Builds</div>';
+    r.builds.forEach(function(item) {
+      var b = item.build;
+      var q2 = String.fromCharCode(39);
+      var pts = b.points_used || 0;
+      html += '<div class="search-result-item" onclick="navigateToBuild(' + q2 + b.id + q2 + ')">' +
+        '<div class="search-result-icon build"><i class="ti ti-sliders"></i></div>' +
+        '<div class="search-result-body">' +
+          '<div class="search-result-name">' + (b.name || 'Build sans nom') + '</div>' +
+          '<div class="search-result-sub">' + (item.playerName || '—') + ' · ' + pts + ' pts</div>' +
+        '</div>' +
+      '</div>';
+    });
+    html += '</div>';
+  }
+  if (r.matches.length > 0) {
+    html += '<div class="search-group"><div class="search-group-title"><i class="ti ti-ball-football" style="margin-right:4px"></i>Matchs</div>';
+    r.matches.forEach(function(m) {
+      var q2 = String.fromCharCode(39);
+      var resClass = m.result === 'V' ? 'win' : m.result === 'N' ? 'draw' : 'loss';
+      var resLabel = m.result === 'V' ? 'Victoire' : m.result === 'N' ? 'Nul' : 'Défaite';
+      var score = (m.score_for || 0) + ' - ' + (m.score_against || 0);
+      var date = m.match_date || (m.played_at ? m.played_at.slice(0,10) : '');
+      var sub = [score, m.rank || '', date].filter(Boolean).join(' · ');
+      html += '<div class="search-result-item" onclick="navigateToMatch(' + q2 + m.id + q2 + ')">' +
+        '<div class="search-result-icon match ' + resClass + '">' +
+          (m.result === 'V' ? '<i class="ti ti-trophy"></i>' : m.result === 'N' ? '<i class="ti ti-minus"></i>' : '<i class="ti ti-x"></i>') +
+        '</div>' +
+        '<div class="search-result-body">' +
+          '<div class="search-result-name">vs ' + (m.opp_name || 'Adversaire inconnu') + '</div>' +
+          '<div class="search-result-sub">' + sub + '</div>' +
+        '</div>' +
+        '<span class="search-result-badge ' + resClass + '">' + resLabel + '</span>' +
+      '</div>';
+    });
+    html += '</div>';
+  }
+  return html;
+}
+
+function renderSearchOverlay() {
+  return '<div class="search-overlay" id="search-overlay" onclick="onSearchOverlayClick(event)">' +
+    '<div class="search-panel" onclick="event.stopPropagation()">' +
+      '<div class="search-panel-input-wrap">' +
+        '<i class="ti ti-search"></i>' +
+        '<input id="search-panel-input" class="search-panel-input" type="text" placeholder="Rechercher joueur, build, match…" ' +
+          'value="' + (State.search.query || '') + '" ' +
+          'oninput="onSearchInput(this.value)" ' +
+          'onkeydown="onSearchKeydown(event)">' +
+        '<span class="search-kbd" onclick="closeSearchOverlay()">Esc</span>' +
+      '</div>' +
+      '<div class="search-results" id="search-results-body">' +
+        buildSearchResultsHTML() +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function onSearchOverlayClick(e) {
+  if (e.target.id === 'search-overlay') closeSearchOverlay();
+}
+
+function onSearchKeydown(e) {
+  if (e.key === 'Escape') closeSearchOverlay();
+}
+
+async function navigateToPlayer(playerId) {
+  closeSearchOverlay();
+  State.activeTab = 'effectif';
+  await selectPlayer(playerId);
+  render();
+}
+
+async function navigateToBuild(buildId) {
+  closeSearchOverlay();
+  State.activeTab = 'effectif';
+  State.activePlayerTab = 'builds';
+  // Trouver la carte et le joueur
+  var foundCardId = null;
+  var foundPlayerId = null;
+  Object.entries(State.cards).forEach(function(entry) {
+    var pid = entry[0]; var pcards = entry[1];
+    pcards.forEach(function(c) {
+      var builds = State.builds[c.id] || [];
+      if (builds.find(function(b) { return b.id === buildId; })) {
+        foundCardId = c.id;
+        foundPlayerId = pid;
+      }
+    });
+  });
+  if (foundPlayerId) {
+    State.selectedPlayerId = foundPlayerId;
+    State.selectedCardId = foundCardId;
+    State.selectedBuildId = buildId;
+  }
+  render();
+}
+
+function navigateToMatch(matchId) {
+  closeSearchOverlay();
+  State.activeTab = 'matchs';
+  State.search.highlightMatchId = matchId;
+  render();
+  // Highlight temporaire
+  setTimeout(function() {
+    var el = document.getElementById('match-row-' + matchId);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.style.transition = 'background 0.3s';
+      el.style.background = 'var(--accent-dim)';
+      setTimeout(function() { el.style.background = ''; }, 1500);
+    }
+    State.search.highlightMatchId = null;
+  }, 80);
+}
+
+// ── Onglet Formation ──────────────────────────────────────────────────────────
+var LINEUP_STORAGE_KEY = 'efb_last_lineup';
+var SQUAD_STORAGE_KEY = 'efb_squad_23';
+var _ftFormation = '';        // formation sélectionnée
+var _ftTitulaires = [];       // [{player_id, card_id, build_id, slot_idx}] 11 max
+var _ftRemplacants = [];      // [{player_id, card_id, build_id}] 12 max
+var _ftSelectedSlot = null;   // slot terrain sélectionné (idx)
+var _ftMode = 'terrain';      // 'terrain' | 'liste'
+var FT_STORAGE_KEY = 'efb_ft_lineup';
+
+function ftLoad() {
+  loadSquad23();
+  loadAllCustomFormations();
+  try {
+    var saved = JSON.parse(localStorage.getItem(FT_STORAGE_KEY) || 'null');
+    if (saved) {
+      var allPids = State.players.map(function(p) { return p.id; });
+      _ftFormation = saved.formation || '';
+      _ftTitulaires = (saved.titulaires || []).filter(function(s) { return !s.player_id || allPids.includes(s.player_id); });
+      _ftRemplacants = (saved.remplacants || []).filter(function(s) { return allPids.includes(s.player_id); });
+      return;
+    }
+  } catch(e) {}
+  // Initialiser depuis Squad23
+  _ftFormation = '';
+  _ftTitulaires = Array(11).fill(null).map(function(_, i) { return { slot_idx: i, player_id: null }; });
+  _ftRemplacants = [];
+  // Pré-remplir depuis squad23 si disponible
+  if (_squad23.length > 0) {
+    _squad23.slice(0, 11).forEach(function(s, i) {
+      _ftTitulaires[i] = { slot_idx: i, player_id: s.player_id, card_id: s.card_id, build_id: s.build_id };
+    });
+    _ftRemplacants = _squad23.slice(11).map(function(s) {
+      return { player_id: s.player_id, card_id: s.card_id, build_id: s.build_id };
+    });
+  }
+}
+
+function ftSave() {
+  try {
+    localStorage.setItem(FT_STORAGE_KEY, JSON.stringify({
+      formation: _ftFormation,
+      titulaires: _ftTitulaires,
+      remplacants: _ftRemplacants,
+    }));
+    // Synchroniser avec LINEUP_STORAGE_KEY pour que le modal match en profite
+    var validTitus = _ftTitulaires.filter(function(t) { return t && t.player_id; });
+    localStorage.setItem(LINEUP_STORAGE_KEY, JSON.stringify({
+      titulaires: validTitus,
+      remplacants: _ftRemplacants,
+    }));
+  } catch(e) {}
+}
+
+function renderFormationTab() {
+  ftLoad();
+  var q = String.fromCharCode(39);
+  var slots = _ftFormation ? buildPitchSlots(_ftFormation) : null;
+  var hasPitch = !!(slots && slots.length === 11);
+
+  // Header
+  var html = '<div class="ft-layout">';
+
+  // Colonne gauche : terrain
+  html += '<div class="ft-pitch-col">';
+  html += '<div class="ft-toolbar">';
+  html += '<div style="display:flex;gap:6px;align-items:center;flex:1">';
+  html += '<input type="text" id="ft-formation-input" class="form-input form-input-sm" style="width:90px" placeholder="4-3-3" value="' + _ftFormation + '" oninput="ftOnFormationInput(this.value)">';
+  html += '<button class="btn-sm btn-ghost" onclick="ftOpenPicker()" title="Choisir"><i class="ti ti-ball-football"></i></button>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:4px">';
+  html += '<button class="btn-sm ' + (_ftMode === 'terrain' ? 'btn-primary' : 'btn-ghost') + '" onclick="ftSetMode(' + q + 'terrain' + q + ')"><i class="ti ti-layout-soccer-field"></i> Terrain</button>';
+  html += '<button class="btn-sm ' + (_ftMode === 'liste' ? 'btn-primary' : 'btn-ghost') + '" onclick="ftSetMode(' + q + 'liste' + q + ')"><i class="ti ti-list"></i> Liste</button>';
+  html += '</div>';
+  html += '</div>';
+
+  if (_ftMode === 'terrain') {
+    if (hasPitch) {
+      html += '<div class="pitch-formation-label">' + _ftFormation + '</div>';
+      html += renderFtPitchSVG(slots);
+      html += '<div class="pitch-legend">' +
+        '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="border-color:#60a5fa"></span>Titulaire — glisse pour repositionner</span>' +
+        '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="border-color:var(--border);background:rgba(255,255,255,0.04)"></span>Poste vide</span>' +
+      '</div>';
+      setTimeout(bindFtPitchDrag, 60);
+    } else {
+      html += '<div class="pitch-placeholder">' +
+        '<i class="ti ti-ball-football" style="font-size:36px;color:var(--border)"></i>' +
+        '<p>Entre une formation<br>pour voir le terrain</p>' +
+      '</div>';
+    }
+  } else {
+    html += renderFtListeView();
+  }
+
+  html += '</div>'; // ft-pitch-col
+
+  // Séparateur redimensionnable
+  html += '<div class="ft-divider" id="ft-divider" onmousedown="ftDividerStart(event)"></div>';
+
+  // Colonne droite : joueurs disponibles + slot sélectionné
+  html += '<div class="ft-right-col">';
+  html += '<div class="ft-right-top" id="ft-slot-panel">' + renderFtSlotPanel() + '</div>';
+  html += '<div class="ft-hdivider" id="ft-hdivider" onmousedown="ftHDividerStart(event)"></div>';
+  html += '<div class="ft-right-bottom">' + renderFtBench() + '</div>';
+  html += '</div>';
+
+  html += '</div>'; // ft-layout
+  return html;
+}
+
+function renderFtPitchSVG(slots) {
+  var q = String.fromCharCode(39);
+  var W = 200; var H = 310;
+
+  var nodes = slots.map(function(slot, i) {
+    var titu = _ftTitulaires[i];
+    var cx = Math.round(slot.left / 100 * W);
+    var cy = Math.round(slot.top / 100 * H);
+    var hasPlayer = titu && titu.player_id;
+    var player = hasPlayer ? State.players.find(function(p) { return p.id === titu.player_id; }) : null;
+    var name = player ? player.name.split(' ').pop() : '';
+    var isSelected = _ftSelectedSlot === i;
+    var swapMode = _ftSelectedSlot !== null && _ftSelectedSlot !== i; // un autre slot est sélectionné
+
+    if (!hasPlayer) {
+      // Poste vide — cible possible si un joueur est sélectionné
+      var emptyFill = swapMode ? 'rgba(245,158,11,0.1)' : 'rgba(255,255,255,0.04)';
+      var emptyStroke = isSelected ? '#f59e0b' : (swapMode ? '#f59e0b' : 'rgba(255,255,255,0.2)');
+      var emptyStrokeW = swapMode ? '1.5' : '1';
+      return '<g onclick="ftSelectSlot(' + i + ')" style="cursor:pointer">' +
+        '<circle cx="' + cx + '" cy="' + cy + '" r="15" fill="' + emptyFill + '" stroke="' + emptyStroke + '" stroke-width="' + emptyStrokeW + '" stroke-dasharray="3,2"/>' +
+        '<text x="' + cx + '" y="' + (cy+4) + '" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.3)">' + slot.label + '</text>' +
+      '</g>';
+    }
+
+    // Joueur présent
+    var fill = isSelected ? '#2a1f00' : (swapMode ? '#1a2a3a' : '#1e3a5f');
+    var stroke = isSelected ? '#f59e0b' : (swapMode ? '#60a5fa' : '#60a5fa');
+    var strokeW = isSelected ? '2.5' : '1.5';
+    // Halo d'échange sur les cibles
+    var halo = swapMode && hasPlayer ? '<circle cx=\"' + cx + '\" cy=\"' + cy + '\" r=\"18\" fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"1\" stroke-dasharray=\"3,2\" opacity=\"0.5\"/>' : '';
+    var posLabel = titu.position_label || slot.label;
+
+    return '<g class=\"ft-draggable-node\" data-slot=\"' + i + '\" onclick=\"ftSelectSlot(' + i + ')\" style=\"cursor:grab\">' +
+      halo +
+      '<circle cx=\"' + cx + '\" cy=\"' + cy + '\" r=\"15\" fill=\"' + fill + '\" stroke=\"' + stroke + '\" stroke-width=\"' + strokeW + '\"/>' +
+      (isSelected ? '<circle cx=\"' + cx + '\" cy=\"' + cy + '\" r=\"19\" fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"1.5\" opacity=\"0.6\"/>' : '') +
+      '<text x=\"' + cx + '\" y=\"' + (cy+3) + '\" text-anchor=\"middle\" font-size=\"8\" font-weight=\"700\" fill=\"#fff\">' + posLabel + '</text>' +
+      '<text x=\"' + cx + '\" y=\"' + (cy+24) + '\" text-anchor=\"middle\" font-size=\"7.5\" fill=\"' + (isSelected ? '#f59e0b' : '#e2e8f0') + '\" font-weight=\"' + (isSelected ? '700' : '500') + '\">' + name + '</text>' +
+    '</g>';
+  }).join('');
+
+  return '<svg id="ft-pitch-svg" viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;border-radius:8px;max-height:calc(100vh - 200px)">' +
+    '<rect x="0" y="0" width="' + W + '" height="' + H + '" rx="8" fill="#1a3a1a"/>' +
+    '<rect x="8" y="8" width="' + (W-16) + '" height="' + (H-16) + '" rx="4" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
+    '<line x1="8" y1="' + (H/2) + '" x2="' + (W-8) + '" y2="' + (H/2) + '" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
+    '<circle cx="' + (W/2) + '" cy="' + (H/2) + '" r="26" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>' +
+    '<rect x="' + (W/2-28) + '" y="8" width="56" height="32" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>' +
+    '<rect x="' + (W/2-28) + '" y="' + (H-40) + '" width="56" height="32" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>' +
+    nodes +
+  '</svg>';
+}
+
+function renderFtListeView() {
+  var q = String.fromCharCode(39);
+  var html = '<div class="ft-liste">';
+
+  html += '<div class="ft-liste-section">';
+  html += '<div class="ft-liste-title">Titulaires (' + _ftTitulaires.filter(function(t) { return t && t.player_id; }).length + '/11)</div>';
+  _ftTitulaires.forEach(function(titu, i) {
+    var slots = _ftFormation ? buildPitchSlots(_ftFormation) : null;
+    var posLabel = slots && slots[i] ? slots[i].label : (i + 1);
+    var player = titu && titu.player_id ? State.players.find(function(p) { return p.id === titu.player_id; }) : null;
+    var isSelected = _ftSelectedSlot === i;
+    html += '<div class="ft-liste-row' + (isSelected ? ' selected' : '') + '" onclick="ftSelectSlot(' + i + ')">' +
+      '<span class="ft-liste-pos">' + posLabel + '</span>' +
+      (player
+        ? '<span class="ft-liste-name">' + player.name + '</span>' +
+          '<button class="btn-icon-xs" onclick="ftRemoveFromSlot(event,' + i + ')"><i class="ti ti-x"></i></button>'
+        : '<span class="ft-liste-empty">— vide —</span>') +
+    '</div>';
+  });
+  html += '</div>';
+
+  html += '<div class="ft-liste-section" style="margin-top:10px">';
+  html += '<div class="ft-liste-title">Remplaçants (' + _ftRemplacants.length + '/12)</div>';
+  _ftRemplacants.forEach(function(remp, i) {
+    var player = State.players.find(function(p) { return p.id === remp.player_id; });
+    html += '<div class="ft-liste-row">' +
+      '<span class="ft-liste-pos" style="color:var(--muted)">' + (i+1) + '</span>' +
+      '<span class="ft-liste-name">' + (player ? player.name : '?') + '</span>' +
+      '<button class="btn-icon-xs" onclick="ftRemoveRemplacant(event,' + i + ')"><i class="ti ti-x"></i></button>' +
+    '</div>';
+  });
+  html += '</div>';
+
+  html += '</div>';
+  return html;
+}
+
+function renderFtSlotPanel() {
+  var q = String.fromCharCode(39);
+  if (_ftSelectedSlot === null) {
+    return '<div class="ft-slot-hint"><i class="ti ti-click" style="font-size:20px;color:var(--muted)"></i><p>Clique un poste sur le terrain<br>pour assigner un joueur</p></div>';
+  }
+  var slots = _ftFormation ? buildPitchSlots(_ftFormation) : null;
+  var posLabel = slots && slots[_ftSelectedSlot] ? slots[_ftSelectedSlot].label : ('Poste ' + (_ftSelectedSlot + 1));
+  var titu = _ftTitulaires[_ftSelectedSlot];
+  var player = titu && titu.player_id ? State.players.find(function(p) { return p.id === titu.player_id; }) : null;
+
+  var html = '<div class="ft-slot-header">' +
+    '<span class="ft-slot-pos-badge">' + posLabel + '</span>' +
+    '<span class="ft-slot-title">' + (player ? player.name : 'Poste vide') + '</span>' +
+    (player ? '<button class="btn-icon-xs" onclick="ftRemoveFromSlot(null,' + _ftSelectedSlot + ')"><i class="ti ti-x"></i></button>' : '') +
+  '</div>';
+
+  if (player) {
+    html += '<div style="font-size:11px;color:var(--amber);padding:6px 0 8px;display:flex;align-items:center;gap:6px">' +
+      '<i class="ti ti-arrows-exchange"></i>' +
+      '<span>Clique un autre poste pour échanger, ou un poste vide pour déplacer</span>' +
+    '</div>';
+  }
+
+  // Liste joueurs disponibles pour ce poste (ni titulaires ni remplaçants)
+  var usedPids = _ftTitulaires.filter(function(t) { return t && t.player_id; }).map(function(t) { return t.player_id; });
+  var rempPids = _ftRemplacants.map(function(r) { return r.player_id; });
+
+  // Joueurs du banc en priorité
+  var benchPlayers = _ftRemplacants.map(function(r) {
+    return State.players.find(function(p) { return p.id === r.player_id; });
+  }).filter(Boolean);
+
+  // Joueurs ni titulaires ni remplaçants
+  var available = State.players.filter(function(p) {
+    return !usedPids.includes(p.id) && !rempPids.includes(p.id) && (State.cards[p.id] || []).length > 0;
+  });
+
+  html += '<div class="ft-player-picker">';
+
+  // Joueurs du banc en premier (avec badge banc)
+  if (benchPlayers.length > 0) {
+    html += '<div style="font-size:10px;color:var(--muted);padding:4px 6px 2px;text-transform:uppercase;letter-spacing:.5px">Du banc</div>';
+    benchPlayers.forEach(function(p) {
+      var cards = State.cards[p.id] || [];
+      var card = cards[0];
+      var cardType = card ? (card.card_type || '') : '';
+      html += '<div class="ft-player-pick-row" onclick="ftAssignToSlot(' + q + p.id + q + ')" style="border-left:2px solid var(--green)">' +
+        '<span class="ft-player-pick-name">' + p.name + '</span>' +
+        (cardType ? '<span class="ft-player-pick-type">' + cardType + '</span>' : '') +
+        '<span style="font-size:9px;color:var(--green)">Banc</span>' +
+      '</div>';
+    });
+  }
+
+  // Autres joueurs disponibles
+  if (available.length > 0) {
+    html += '<div style="font-size:10px;color:var(--muted);padding:6px 6px 2px;text-transform:uppercase;letter-spacing:.5px">Autres joueurs</div>';
+    available.forEach(function(p) {
+      var cards = State.cards[p.id] || [];
+      var card = cards[0];
+      var cardType = card ? (card.card_type || '') : '';
+      html += '<div class="ft-player-pick-row" onclick="ftAssignToSlot(' + q + p.id + q + ')">' +
+        '<span class="ft-player-pick-name">' + p.name + '</span>' +
+        (cardType ? '<span class="ft-player-pick-type">' + cardType + '</span>' : '') +
+      '</div>';
+    });
+  }
+
+  if (benchPlayers.length === 0 && available.length === 0) {
+    html += '<div style="font-size:11px;color:var(--muted);padding:8px 0">Tous les joueurs sont assignés</div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function renderFtBench() {
+  var q = String.fromCharCode(39);
+  var usedPids = _ftTitulaires.filter(function(t) { return t && t.player_id; }).map(function(t) { return t.player_id; });
+  var rempPids = _ftRemplacants.map(function(r) { return r.player_id; });
+
+  var html = '<div class="ft-bench-header">' +
+    '<span class="ft-bench-title"><i class="ti ti-armchair"></i> Banc (' + _ftRemplacants.length + '/12)</span>' +
+    '<button class="btn-sm btn-ghost" onclick="ftSaveAndApply()" style="font-size:11px"><i class="ti ti-device-floppy"></i> Sauvegarder</button>' +
+  '</div>';
+
+  var available = State.players.filter(function(p) {
+    return !usedPids.includes(p.id) && !rempPids.includes(p.id) && (State.cards[p.id] || []).length > 0;
+  });
+
+  // Remplaçants actuels
+  if (_ftRemplacants.length > 0) {
+    html += '<div class="ft-bench-list">';
+    _ftRemplacants.forEach(function(remp, i) {
+      var player = State.players.find(function(p) { return p.id === remp.player_id; });
+      html += '<div class="ft-bench-row">' +
+        '<span class="ft-bench-name">' + (player ? player.name : '?') + '</span>' +
+        '<button class="btn-icon-xs" onclick="ftRemoveRemplacant(event,' + i + ')"><i class="ti ti-x"></i></button>' +
+      '</div>';
+    });
+    html += '</div>';
+  }
+
+  // Joueurs disponibles à ajouter au banc
+  if (available.length > 0 && _ftRemplacants.length < 12) {
+    html += '<div class="ft-bench-available">';
+    html += '<div style="font-size:10px;color:var(--muted);margin-bottom:4px">Ajouter au banc :</div>';
+    available.forEach(function(p) {
+      html += '<div class="ft-bench-add-row" onclick="ftAddToBench(' + q + p.id + q + ')">' +
+        '<i class="ti ti-plus" style="font-size:10px;color:var(--green)"></i>' +
+        '<span>' + p.name + '</span>' +
+      '</div>';
+    });
+    html += '</div>';
+  }
+
+  return html;
+}
+
+// ── Actions Formation Tab ─────────────────────────────────────────────────────
+function ftSelectSlot(idx) {
+  // Aucun sélectionné → sélectionner
+  if (_ftSelectedSlot === null) {
+    _ftSelectedSlot = idx;
+    ftRefresh();
+    return;
+  }
+  // Même slot → désélectionner
+  if (_ftSelectedSlot === idx) {
+    _ftSelectedSlot = null;
+    ftRefresh();
+    return;
+  }
+  // Deux slots différents → échanger leurs joueurs
+  var slotA = _ftTitulaires[_ftSelectedSlot];
+  var slotB = _ftTitulaires[idx];
+  // Échanger en conservant les slot_idx
+  var idxA = _ftSelectedSlot;
+  var idxB = idx;
+  _ftTitulaires[idxA] = slotB ? Object.assign({}, slotB, { slot_idx: idxA }) : { slot_idx: idxA, player_id: null };
+  _ftTitulaires[idxB] = slotA ? Object.assign({}, slotA, { slot_idx: idxB }) : { slot_idx: idxB, player_id: null };
+  _ftSelectedSlot = null;
+  ftSave();
+  ftRefresh();
+}
+
+function ftAssignToSlot(pid) {
+  if (_ftSelectedSlot === null) return;
+  var sq = _squad23.find(function(s) { return s.player_id === pid; });
+  var cards = State.cards[pid] || [];
+  var card = sq ? cards.find(function(c) { return c.id === sq.card_id; }) || cards[0] : cards[0];
+
+  // Récupérer l'ancien titulaire du slot
+  var displaced = _ftTitulaires[_ftSelectedSlot];
+  var displacedPid = displaced && displaced.player_id ? displaced.player_id : null;
+
+  // Vérifier si le nouveau joueur vient du banc
+  var fromBenchIdx = _ftRemplacants.findIndex(function(r) { return r.player_id === pid; });
+
+  if (fromBenchIdx >= 0 && displacedPid) {
+    // Échange : remplacer le slot du banc par l'ancien titulaire
+    var sq2 = _squad23.find(function(s) { return s.player_id === displacedPid; });
+    var cards2 = State.cards[displacedPid] || [];
+    var card2 = sq2 ? cards2.find(function(c) { return c.id === sq2.card_id; }) || cards2[0] : cards2[0];
+    _ftRemplacants[fromBenchIdx] = {
+      player_id: displacedPid,
+      card_id: card2 ? card2.id : null,
+      build_id: sq2 ? sq2.build_id : null,
+    };
+  } else {
+    // Joueur hors banc → retirer du banc si présent, envoyer l'ancien titulaire au banc
+    _ftRemplacants = _ftRemplacants.filter(function(r) { return r.player_id !== pid; });
+    if (displacedPid && !_ftRemplacants.find(function(r) { return r.player_id === displacedPid; }) && _ftRemplacants.length < 12) {
+      var sq3 = _squad23.find(function(s) { return s.player_id === displacedPid; });
+      var cards3 = State.cards[displacedPid] || [];
+      var card3 = sq3 ? cards3.find(function(c) { return c.id === sq3.card_id; }) || cards3[0] : cards3[0];
+      _ftRemplacants.push({
+        player_id: displacedPid,
+        card_id: card3 ? card3.id : null,
+        build_id: sq3 ? sq3.build_id : null,
+      });
+    }
+  }
+
+  // Placer le nouveau joueur sur le slot
+  _ftTitulaires[_ftSelectedSlot] = {
+    slot_idx: _ftSelectedSlot,
+    player_id: pid,
+    card_id: card ? card.id : null,
+    build_id: sq ? sq.build_id : null,
+  };
+
+  _ftSelectedSlot = null;
+  ftSave();
+  ftRefresh();
+}
+
+function ftRemoveFromSlot(e, idx) {
+  if (e) e.stopPropagation();
+  _ftTitulaires[idx] = { slot_idx: idx, player_id: null };
+  if (_ftSelectedSlot === idx) _ftSelectedSlot = null;
+  ftSave();
+  ftRefresh();
+}
+
+function ftAddToBench(pid) {
+  if (_ftRemplacants.length >= 12) return;
+  var sq = _squad23.find(function(s) { return s.player_id === pid; });
+  var cards = State.cards[pid] || [];
+  var card = sq ? cards.find(function(c) { return c.id === sq.card_id; }) || cards[0] : cards[0];
+  _ftRemplacants.push({ player_id: pid, card_id: card ? card.id : null, build_id: sq ? sq.build_id : null });
+  ftSave();
+  ftRefresh();
+}
+
+function ftRemoveRemplacant(e, idx) {
+  if (e) e.stopPropagation();
+  _ftRemplacants.splice(idx, 1);
+  ftSave();
+  ftRefresh();
+}
+
+function ftOnFormationInput(val) {
+  _ftFormation = val.trim();
+  ftSave();
+  ftRefresh();
+}
+
+function ftOpenPicker() {
+  // Réutiliser le picker existant avec callback custom
+  loadAllCustomFormations();
+  var q = String.fromCharCode(39);
+  var customs = loadCustomFormations();
+  var customNames = Object.keys(customs);
+  var builtinNames = Object.keys(FORMATION_LAYOUTS).filter(function(k) { return !FORMATION_LAYOUTS[k]._custom_slots; });
+
+  var html = '<div class="fmpicker-overlay" id="fmpicker-overlay" onclick="closeFmPickerIfBg(event)">' +
+    '<div class="fmpicker-panel">' +
+      '<div class="fmpicker-header">' +
+        '<span class="fmpicker-title">Choisir une formation</span>' +
+        '<div style="display:flex;gap:6px">' +
+          '<button class="btn-sm btn-primary" onclick="openFormationEditor(null)"><i class="ti ti-plus"></i> Créer</button>' +
+          '<button class="btn-icon" onclick="closeFmPicker()"><i class="ti ti-x"></i></button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="fmpicker-body">' +
+        (customNames.length > 0 ? '<div class="fmpicker-group-title">Mes formations</div><div class="fmpicker-grid">' + customNames.map(function(n) { return renderFtFormationCard(n, true); }).join('') + '</div>' : '') +
+        '<div class="fmpicker-group-title">Formations standard</div>' +
+        '<div class="fmpicker-grid">' + builtinNames.map(function(n) { return renderFtFormationCard(n, false); }).join('') + '</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+
+  var root = document.createElement('div');
+  root.id = 'fmpicker-root';
+  root.innerHTML = html;
+  document.body.appendChild(root);
+}
+
+function renderFtFormationCard(name, isCustom) {
+  var q = String.fromCharCode(39);
+  var slots = buildPitchSlots(name);
+  if (!slots) return '';
+  var miniSvg = renderMiniPitchSVG(slots);
+  return '<div class="fmpicker-card" onclick="ftSelectFormation(' + q + name.replace(/'/g, "\\'") + q + ')">' +
+    miniSvg +
+    '<div class="fmpicker-card-name">' + name + (isCustom ? ' <span class="badge-custom">Perso</span>' : '') + '</div>' +
+    (isCustom ? '<button class="fmpicker-delete" onclick="deleteCustomFm(event,' + q + name.replace(/'/g, "\\'") + q + ')" title="Supprimer"><i class="ti ti-trash"></i></button>' : '') +
+  '</div>';
+}
+
+function ftSelectFormation(name) {
+  _ftFormation = name;
+  var inp = document.getElementById('ft-formation-input');
+  if (inp) inp.value = name;
+  closeFmPicker();
+  ftSave();
+  ftRefresh();
+}
+
+function ftSetMode(mode) {
+  _ftMode = mode;
+  ftRefresh();
+}
+
+function ftSaveAndApply() {
+  ftSave();
+  // Toast visuel
+  var btn = document.querySelector('.ft-bench-header .btn-sm');
+  if (btn) { btn.innerHTML = '<i class="ti ti-check"></i> Sauvegardé !'; setTimeout(function() { btn.innerHTML = '<i class="ti ti-device-floppy"></i> Sauvegarder'; }, 1500); }
+}
+
+function ftRefresh() {
+  if (State.activeTab !== 'formation') return;
+  var pitchCol = document.querySelector('.ft-pitch-col');
+  var slots = _ftFormation ? buildPitchSlots(_ftFormation) : null;
+  var hasPitch = !!(slots && slots.length === 11);
+  if (pitchCol && hasPitch && _ftMode === 'terrain') {
+    // Re-render seulement le SVG et la légende sans tout re-render
+    var svgEl = document.getElementById('ft-pitch-svg');
+    if (svgEl) {
+      var newSvg = document.createElement('div');
+      newSvg.innerHTML = renderFtPitchSVG(slots);
+      svgEl.parentNode.replaceChild(newSvg.firstChild, svgEl);
+      setTimeout(bindFtPitchDrag, 40);
+    } else {
+      render();
+    }
+    // Refresh slot panel
+    var slotPanel = document.getElementById('ft-slot-panel');
+    if (slotPanel) slotPanel.innerHTML = renderFtSlotPanel();
+    // Refresh bench
+    var bench = document.querySelector('.ft-right-bottom');
+    if (bench) bench.innerHTML = renderFtBench();
+    // Refresh formation label
+    var formLabel = document.querySelector('.pitch-formation-label');
+    if (formLabel) formLabel.textContent = _ftFormation;
+  } else {
+    render();
+  }
+}
+
+// ── Détection de position selon zone du terrain ───────────────────────────────
+// Le terrain est divisé en zones : top% détermine la ligne, left% détermine le côté
+// top: 0-30=ATT, 30-55=MID_OFF, 55-75=MID_DEF, 75-90=DEF, 90-100=GK
+// left: 0-25=Far Left, 25-40=Left, 40-60=Center, 60-75=Right, 75-100=Far Right
+
+var POSITION_SUGGESTIONS = {
+  // GK
+  GK_CENTER:          ['GK'],
+  // DEF
+  DEF_FAR_LEFT:       ['LB', 'CB'],
+  DEF_LEFT:           ['LB', 'CB'],
+  DEF_CENTER:         ['CB'],
+  DEF_RIGHT:          ['RB', 'CB'],
+  DEF_FAR_RIGHT:      ['RB', 'CB'],
+  // MID_DEF
+  MID_DEF_FAR_LEFT:   ['LB', 'LMF', 'DMF'],
+  MID_DEF_LEFT:       ['LMF', 'CMF', 'DMF'],
+  MID_DEF_CENTER:     ['DMF', 'CMF'],
+  MID_DEF_RIGHT:      ['RMF', 'CMF', 'DMF'],
+  MID_DEF_FAR_RIGHT:  ['RB', 'RMF', 'DMF'],
+  // MID_OFF
+  MID_OFF_FAR_LEFT:   ['LMF', 'LWF', 'CMF'],
+  MID_OFF_LEFT:       ['LMF', 'CMF', 'AMF'],
+  MID_OFF_CENTER:     ['CMF', 'AMF', 'DMF'],
+  MID_OFF_RIGHT:      ['RMF', 'CMF', 'AMF'],
+  MID_OFF_FAR_RIGHT:  ['RMF', 'RWF', 'CMF'],
+  // ATT
+  ATT_FAR_LEFT:       ['LWF', 'SS'],
+  ATT_LEFT:           ['LWF', 'SS', 'CF'],
+  ATT_CENTER:         ['CF', 'SS'],
+  ATT_RIGHT:          ['RWF', 'SS', 'CF'],
+  ATT_FAR_RIGHT:      ['RWF', 'SS'],
+  // TOP
+  TOP_FAR_LEFT:       ['LWF'],
+  TOP_LEFT:           ['LWF', 'SS'],
+  TOP_CENTER:         ['CF', 'SS'],
+  TOP_RIGHT:          ['RWF', 'SS'],
+  TOP_FAR_RIGHT:      ['RWF'],
+};
+
+function detectPositionSuggestions(leftPct, topPct) {
+  var h, v;
+  // Vertical (ligne)
+  if (topPct > 85)       h = 'GK';
+  else if (topPct > 70)  h = 'DEF';
+  else if (topPct > 52)  h = 'MID_DEF';
+  else if (topPct > 35)  h = 'MID_OFF';
+  else if (topPct > 15)  h = 'ATT';
+  else                   h = 'TOP';
+  // Horizontal (côté)
+  if (leftPct < 22)       v = 'FAR_LEFT';
+  else if (leftPct < 40)  v = 'LEFT';
+  else if (leftPct < 60)  v = 'CENTER';
+  else if (leftPct < 78)  v = 'RIGHT';
+  else                    v = 'FAR_RIGHT';
+
+  if (h === 'GK') return ['GK'];
+  var key = h + '_' + v;
+  return POSITION_SUGGESTIONS[key] || ['CM'];
+}
+
+function recalcFormation() {
+  // Compter les joueurs par ligne selon leur top%
+  var counts = { gk: 0, def: 0, mid_def: 0, mid_off: 0, att: 0, top: 0 };
+  _ftTitulaires.forEach(function(t) {
+    if (!t || !t.player_id) return;
+    var top = t.top_pct || 88;
+    if (top > 85)       counts.gk++;
+    else if (top > 70)  counts.def++;
+    else if (top > 52)  counts.mid_def++;
+    else if (top > 35)  counts.mid_off++;
+    else                counts.att++;
+  });
+  // Construire le nom de la formation
+  var parts = [];
+  if (counts.def > 0)     parts.push(counts.def);
+  if (counts.mid_def > 0) parts.push(counts.mid_def);
+  if (counts.mid_off > 0) parts.push(counts.mid_off);
+  if (counts.att > 0)     parts.push(counts.att);
+  if (parts.length >= 2) {
+    var name = parts.join('-');
+    _ftFormation = name;
+    var inp = document.getElementById('ft-formation-input');
+    if (inp) inp.value = name;
+  }
+}
+
+// ── Drag & drop joueurs sur le terrain Formation ───────────────────────────────
+var _ftDragIdx = null;
+var _ftDragStartLeft = 0;
+var _ftDragStartTop = 0;
+
+function bindFtPitchDrag() {
+  var svg = document.getElementById('ft-pitch-svg');
+  if (!svg) return;
+  var W = 200; var H = 310;
+
+  function getSVGPos(e) {
+    var rect = svg.getBoundingClientRect();
+    var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    var leftPct = Math.max(5, Math.min(95, (clientX - rect.left) / rect.width * 100));
+    var topPct  = Math.max(5, Math.min(95, (clientY - rect.top)  / rect.height * 100));
+    return { leftPct: leftPct, topPct: topPct };
+  }
+
+  svg.querySelectorAll('.ft-draggable-node').forEach(function(node) {
+    var idx = parseInt(node.getAttribute('data-slot'));
+    var _startX = 0, _startY = 0, _moved = false;
+
+    function onStart(e) {
+      _startX = e.touches ? e.touches[0].clientX : e.clientX;
+      _startY = e.touches ? e.touches[0].clientY : e.clientY;
+      _moved = false;
+      _ftDragIdx = null;
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onEnd);
+      document.addEventListener('touchmove', onMove, { passive: false });
+      document.addEventListener('touchend', onEnd);
+    }
+
+    function onMove(e) {
+      var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      var dx = clientX - _startX;
+      var dy = clientY - _startY;
+      if (!_moved && Math.sqrt(dx*dx + dy*dy) > 6) {
+        _moved = true;
+        _ftDragIdx = idx;
+        _ftSelectedSlot = null;
+        node.style.opacity = '0.6';
+      }
+      if (!_moved || _ftDragIdx !== idx) return;
+      e.preventDefault();
+      var pos = getSVGPos(e);
+      var cx = Math.round(pos.leftPct / 100 * W);
+      var cy = Math.round(pos.topPct  / 100 * H);
+      var circle = node.querySelector('circle');
+      var texts  = node.querySelectorAll('text');
+      if (circle) { circle.setAttribute('cx', cx); circle.setAttribute('cy', cy); }
+      if (texts[0]) { texts[0].setAttribute('x', cx); texts[0].setAttribute('y', cy + 3); }
+      if (texts[1]) { texts[1].setAttribute('x', cx); texts[1].setAttribute('y', cy + 24); }
+      node._dragPos = pos;
+    }
+
+    function onEnd(e) {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onEnd);
+      document.removeEventListener('touchmove', onMove);
+      document.removeEventListener('touchend', onEnd);
+      if (!_moved) {
+        _ftDragIdx = null;
+        node.style.opacity = '1';
+        ftSelectSlot(idx);
+        return;
+      }
+      node.style.opacity = '1';
+      _ftDragIdx = null;
+      if (!node._dragPos) return;
+      var pos = node._dragPos;
+      node._dragPos = null;
+      ftDropPlayer(idx, pos.leftPct, pos.topPct);
+    }
+
+    node.addEventListener('mousedown', onStart);
+    node.addEventListener('touchstart', onStart, { passive: false });
+  });
+}
+
+function ftDropPlayer(slotIdx, leftPct, topPct) {
+  var titu = _ftTitulaires[slotIdx];
+  if (!titu || !titu.player_id) return;
+
+  // Mettre à jour les coordonnées
+  titu.left_pct = Math.round(leftPct * 10) / 10;
+  titu.top_pct  = Math.round(topPct  * 10) / 10;
+
+  // Détecter suggestions de position
+  var suggestions = detectPositionSuggestions(leftPct, topPct);
+
+  // Recalculer formation
+  recalcFormation();
+
+  // Afficher le picker de position
+  showPositionPicker(slotIdx, suggestions, leftPct, topPct);
+}
+
+function showPositionPicker(slotIdx, suggestions, leftPct, topPct) {
+  // Supprimer picker existant
+  var existing = document.getElementById('ft-pos-picker');
+  if (existing) existing.remove();
+
+  var svg = document.getElementById('ft-pitch-svg');
+  if (!svg) return;
+  var rect = svg.getBoundingClientRect();
+  var x = rect.left + leftPct / 100 * rect.width;
+  var y = rect.top  + topPct  / 100 * rect.height;
+
+  var q = String.fromCharCode(39);
+  var picker = document.createElement('div');
+  picker.id = 'ft-pos-picker';
+  picker.style.cssText = 'position:fixed;z-index:400;background:var(--surface);border:0.5px solid var(--accent);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:4px;box-shadow:0 4px 20px rgba(0,0,0,0.5)';
+  picker.style.left = Math.min(x + 20, window.innerWidth - 140) + 'px';
+  picker.style.top  = Math.min(y - 20, window.innerHeight - 120) + 'px';
+
+  var label = document.createElement('div');
+  label.style.cssText = 'font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;padding:2px 4px;';
+  label.textContent = 'Choisir la position';
+  picker.appendChild(label);
+
+  suggestions.forEach(function(pos) {
+    var btn = document.createElement('button');
+    btn.style.cssText = 'padding:5px 14px;border-radius:5px;border:0.5px solid var(--border);background:var(--surface3);color:var(--text);font-size:12px;font-weight:600;cursor:pointer;text-align:left;';
+    btn.textContent = pos;
+    btn.onmouseenter = function() { btn.style.background = 'var(--accent)'; btn.style.color = '#fff'; };
+    btn.onmouseleave = function() { btn.style.background = 'var(--surface3)'; btn.style.color = 'var(--text)'; };
+    btn.onclick = function() {
+      ftApplyPosition(slotIdx, pos);
+      picker.remove();
+    };
+    picker.appendChild(btn);
+  });
+
+  // Bouton annuler
+  var cancel = document.createElement('button');
+  cancel.style.cssText = 'padding:4px 14px;border-radius:5px;border:none;background:none;color:var(--muted);font-size:11px;cursor:pointer;';
+  cancel.textContent = '✕ Annuler';
+  cancel.onclick = function() { picker.remove(); ftRefresh(); };
+  picker.appendChild(cancel);
+
+  document.body.appendChild(picker);
+
+  // Fermer si clic extérieur
+  setTimeout(function() {
+    document.addEventListener('mousedown', function closePicker(e) {
+      if (!picker.contains(e.target)) {
+        picker.remove();
+        ftRefresh();
+        document.removeEventListener('mousedown', closePicker);
+      }
+    });
+  }, 100);
+}
+
+function ftApplyPosition(slotIdx, posLabel) {
+  var titu = _ftTitulaires[slotIdx];
+  if (!titu) return;
+  titu.position_label = posLabel;
+  // Mettre à jour le label dans le slot du terrain
+  var slots = buildPitchSlots(_ftFormation);
+  if (slots && slots[slotIdx]) {
+    slots[slotIdx].label = posLabel;
+    // Mettre à jour FORMATION_LAYOUTS custom si formation custom
+    // ou reconstruire les labels
+    POSITION_LABELS_BY_FORMATION[_ftFormation] = _ftTitulaires.map(function(t, i) {
+      return t && t.position_label ? t.position_label : (slots[i] ? slots[i].label : '?');
+    });
+  }
+  recalcFormation();
+  ftSave();
+  ftRefresh();
+}
+var _ftHDivDragging = false;
+var _ftHDivStartY = 0;
+var _ftHDivStartH = 0;
+
+function ftHDividerStart(e) {
+  e.preventDefault();
+  var top = document.getElementById('ft-slot-panel');
+  if (!top) return;
+  _ftHDivDragging = true;
+  _ftHDivStartY = e.clientY;
+  _ftHDivStartH = top.offsetHeight;
+  var divider = document.getElementById('ft-hdivider');
+  if (divider) divider.classList.add('dragging');
+  document.addEventListener('mousemove', ftHDividerMove);
+  document.addEventListener('mouseup', ftHDividerEnd);
+}
+
+function ftHDividerMove(e) {
+  if (!_ftHDivDragging) return;
+  var top = document.getElementById('ft-slot-panel');
+  var rightCol = document.querySelector('.ft-right-col');
+  if (!top || !rightCol) return;
+  var delta = e.clientY - _ftHDivStartY;
+  var totalH = rightCol.offsetHeight;
+  var newH = Math.max(80, Math.min(totalH - 120, _ftHDivStartH + delta));
+  top.style.height = newH + 'px';
+  top.style.flex = 'none';
+}
+
+function ftHDividerEnd() {
+  _ftHDivDragging = false;
+  var divider = document.getElementById('ft-hdivider');
+  if (divider) divider.classList.remove('dragging');
+  document.removeEventListener('mousemove', ftHDividerMove);
+  document.removeEventListener('mouseup', ftHDividerEnd);
+}
+var _ftDivStartX = 0;
+var _ftDivStartW = 0;
+
+function ftDividerStart(e) {
+  e.preventDefault();
+  var pitchCol = document.querySelector('.ft-pitch-col');
+  if (!pitchCol) return;
+  _ftDivDragging = true;
+  _ftDivStartX = e.clientX;
+  _ftDivStartW = pitchCol.offsetWidth;
+  var divider = document.getElementById('ft-divider');
+  if (divider) divider.classList.add('dragging');
+  document.addEventListener('mousemove', ftDividerMove);
+  document.addEventListener('mouseup', ftDividerEnd);
+}
+
+function ftDividerMove(e) {
+  if (!_ftDivDragging) return;
+  var pitchCol = document.querySelector('.ft-pitch-col');
+  if (!pitchCol) return;
+  var delta = e.clientX - _ftDivStartX;
+  var newW = Math.max(180, Math.min(window.innerWidth * 0.6, _ftDivStartW + delta));
+  pitchCol.style.width = newW + 'px';
+}
+
+function ftDividerEnd() {
+  _ftDivDragging = false;
+  var divider = document.getElementById('ft-divider');
+  if (divider) divider.classList.remove('dragging');
+  document.removeEventListener('mousemove', ftDividerMove);
+  document.removeEventListener('mouseup', ftDividerEnd);
 }
 
 // ── Onglet Effectif ───────────────────────────────────────────────────────────
@@ -331,6 +1444,31 @@ function renderStatsTab(card) {
 function renderBuildsTab(card) {
   if (!card) return renderNoCard();
   const builds = State.builds[card.id] || [];
+  const isTrending = card.card_type === 'Trending';
+
+  // Vérifier si le joueur est déjà dans la sélection
+  loadSquad23();
+  const inSquad = _squad23.some(function(s) { return s.card_id === card.id; });
+
+  if (isTrending) {
+    return `
+      <div class="builds-tab">
+        <div class="builds-header">
+          <div style="display:flex;align-items:center;gap:8px;flex:1">
+            <span class="badge badge-trending">Trending</span>
+            <span style="font-size:12px;color:var(--muted)">Carte figée — pas de build possible</span>
+          </div>
+          <button class="btn-sm ${inSquad ? 'btn-ghost' : 'btn-primary'}" onclick="addTrendingToSquad23('${card.id}')" ${inSquad ? 'disabled' : ''}>
+            <i class="ti ti-user-${inSquad ? 'check' : 'plus'}"></i>
+            ${inSquad ? 'Dans la sélection' : 'Ajouter à la sélection'}
+          </button>
+        </div>
+        <div class="empty-state" style="padding:20px 0">
+          <p style="color:var(--muted);font-size:12px">Les cartes Trending sont non développables.<br>Le joueur peut être ajouté à la sélection sans build.</p>
+        </div>
+      </div>
+    `;
+  }
 
   return `
     <div class="builds-tab">
@@ -568,7 +1706,7 @@ function renderMatchRow(match) {
   const date = new Date(match.played_at).toLocaleDateString('fr-FR');
 
   return `
-    <div class="match-row">
+    <div class="match-row" id="match-row-${match.id}">
       <div class="match-result ${resultClass}">${resultLabel}</div>
       <div class="match-info">
         <span class="match-score">${match.score_for} – ${match.score_against}</span>
@@ -759,67 +1897,215 @@ function renderCoachingResult() {
 }
 
 function renderAnalyse() {
-  const stats = Analyse.globalStats(State.matches);
-  const serie = Analyse.series(State.matches);
-  const byRank = Analyse.byRank(State.matches);
+  const matches = State.matches;
+  const stats    = Analyse.globalStats(matches);
+  const serie    = Analyse.series(matches);
+  const byRank   = Analyse.byRank(matches);
+  const byBuild  = Analyse.byBuild(matches);
+  const byPlayer = Analyse.byPlayer(matches);
+  const byForm   = Analyse.byFormation(matches);
+  const byType   = Analyse.byMatchType(matches);
+  const bestXI   = Analyse.bestXI(matches);
+
+  const MATCH_TYPE_LABELS = {
+    ligue_jcj_d1: '🏆 Ligue JCJ D1', ligue_jcj_d2: '🏆 Ligue JCJ D2', ligue_jcj_d3: '🏆 Ligue JCJ D3',
+    ligue_ia_d1: '🤖 Ligue IA D1',   ligue_ia_d2: '🤖 Ligue IA D2',   ligue_ia_d3: '🤖 Ligue IA D3',
+    event_jcj: '🎯 Évènement JCJ',   event_ia: '🎯 Évènement IA',
+    amical: '🤝 Amical',             my_league: '⚽ My League',
+  };
+
+  // ── Helpers ──
+  function winBar(wins, draws, losses, total) {
+    if (!total) return '';
+    return `<div class="an-bar-wrap">
+      <div class="an-seg-w" style="width:${wins/total*100}%"></div>
+      <div class="an-seg-d" style="width:${draws/total*100}%"></div>
+      <div class="an-seg-l" style="width:${losses/total*100}%"></div>
+    </div>`;
+  }
+
+  function pill(val, color) {
+    return `<span class="an-pill" style="color:${color}">${val}</span>`;
+  }
+
+  // ── KPIs ──
+  const kpiHtml = `
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-val">${stats.total}</div><div class="kpi-label">Matchs</div></div>
+      <div class="kpi"><div class="kpi-val" style="color:#34d399">${stats.winRate}%</div><div class="kpi-label">Victoires</div></div>
+      <div class="kpi"><div class="kpi-val">${stats.goalsFor}</div><div class="kpi-label">Buts marqués</div></div>
+      <div class="kpi"><div class="kpi-val">${stats.goalsAgainst}</div><div class="kpi-label">Buts encaissés</div></div>
+      <div class="kpi highlight"><div class="kpi-val" style="color:#a78bfa">${serie.current}</div><div class="kpi-label">Série actuelle</div></div>
+      <div class="kpi highlight"><div class="kpi-val" style="color:#a78bfa">${serie.record}</div><div class="kpi-label">Record</div></div>
+    </div>`;
+
+  // ── Séries ──
+  const serieHtml = renderSerieBlock('Série en cours', serie.current, serie.currentMatches, 'actuelle') +
+    (serie.record > serie.current ? renderSerieBlock('Record', serie.record, serie.recordMatches, 'record') : '');
+
+  // ── Coaching IA ──
+  const coachingHtml = `
+    <div class="coaching-block">
+      <div class="coaching-header">
+        <div><div class="coaching-title">🤖 Coaching IA</div><div class="coaching-subtitle">Analyse ta performance et recommandations personnalisées</div></div>
+        <button class="btn-sm btn-primary" onclick="generateCoaching()" id="btn-coaching">✨ Générer</button>
+      </div>
+      <div id="coaching-result"></div>
+    </div>`;
+
+  // ── Par type de match ──
+  const byTypeHtml = byType.length === 0 ? '' : `
+    <div class="an-section">
+      <div class="an-section-title"><i class="ti ti-tournament"></i> Par type de match</div>
+      <div class="an-table">
+        ${byType.map(t => `
+          <div class="an-row">
+            <span class="an-row-label">${MATCH_TYPE_LABELS[t.match_type] || t.match_type}</span>
+            ${winBar(t.wins, t.draws, t.losses, t.total)}
+            <span class="an-row-pct">${t.winRate}%</span>
+            <span class="an-row-sub">${t.total}J</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  // ── Par rang ──
+  const byRankHtml = byRank.length === 0 ? '' : `
+    <div class="an-section">
+      <div class="an-section-title"><i class="ti ti-medal"></i> Par rang</div>
+      <div class="an-table">
+        ${byRank.map(r => `
+          <div class="an-row">
+            <span class="an-row-label">${r.rank}</span>
+            ${winBar(r.wins, r.draws, r.losses, r.total)}
+            <span class="an-row-pct">${r.winRate}%</span>
+            <span class="an-row-sub">${r.total}J · Série ${r.serie.record}</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  // ── Par formation ──
+  const byFormHtml = byForm.length === 0 ? '' : `
+    <div class="an-section">
+      <div class="an-section-title"><i class="ti ti-layout-soccer-field"></i> Par formation</div>
+      <div class="an-table">
+        ${byForm.map(f => `
+          <div class="an-row">
+            <span class="an-row-label" style="font-weight:700">${f.formation}</span>
+            ${winBar(f.wins, f.draws, f.losses, f.total)}
+            <span class="an-row-pct">${f.winRate}%</span>
+            <span class="an-row-sub">${f.total}J · ${f.goalsFor} buts</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  // ── Par build ──
+  const byBuildHtml = byBuild.length === 0 ? '' : `
+    <div class="an-section">
+      <div class="an-section-title"><i class="ti ti-sliders"></i> Performance par build</div>
+      <div class="an-table">
+        ${byBuild.slice(0, 10).map(b => {
+          const build = Object.values(State.builds).flat().find(x => x.id === b.build_id);
+          const card  = build ? Object.values(State.cards).flat().find(c => c.id === build.card_id) : null;
+          const playerObj = card ? State.players.find(p => p.id === card.player_id) : null;
+          const buildName  = build  ? build.name  : '—';
+          const playerName = playerObj ? playerObj.name : '—';
+          return `
+          <div class="an-row an-row-build">
+            <div class="an-row-build-info">
+              <span class="an-row-label">${buildName}</span>
+              <span class="an-row-sub">${playerName}</span>
+            </div>
+            ${winBar(b.wins, b.draws, b.losses, b.matchCount)}
+            <span class="an-row-pct">${b.winRate}%</span>
+            <div class="an-row-build-stats">
+              <span title="Buts">⚽ ${b.goals}</span>
+              <span title="Passes">🎯 ${b.assists}</span>
+              <span title="Note moy." style="color:var(--accent)">★ ${b.avgRating || '—'}</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+  // ── Meilleur XI ──
+  const bestXIHtml = bestXI.length === 0 ? '' : `
+    <div class="an-section">
+      <div class="an-section-title"><i class="ti ti-users"></i> Meilleur XI (taux de victoire)</div>
+      <div class="an-xi-grid">
+        ${bestXI.map((p, i) => {
+          const player = State.players.find(x => x.id === p.player_id);
+          const cards  = State.cards[p.player_id] || [];
+          const card   = cards[0];
+          const pos    = card && card.efhub_stats ? (card.efhub_stats.position || '') : '';
+          const efhubId = player ? Efhub.parseId(player.efhub_url || '') : null;
+          const imgUrl  = efhubId ? Efhub.imgUrl(efhubId) : null;
+          const ratingColor = p.winRate >= 70 ? '#34d399' : p.winRate >= 50 ? '#f59e0b' : '#f87171';
+          return `
+          <div class="an-xi-card">
+            <div class="an-xi-rank">#${i+1}</div>
+            ${imgUrl ? `<img src="${imgUrl}" class="an-xi-img" onerror="this.style.display='none'">` : ''}
+            <div class="an-xi-name">${player ? player.name : '?'}</div>
+            <div class="an-xi-pos">${pos}</div>
+            <div class="an-xi-wr" style="color:${ratingColor}">${p.winRate}%</div>
+            <div class="an-xi-sub">⚽${p.goals} 🎯${p.assists} ★${p.avgRating||'—'}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+
+  // ── Top joueurs ──
+  const topPlayersHtml = byPlayer.length === 0 ? '' : `
+    <div class="an-section">
+      <div class="an-section-title"><i class="ti ti-award"></i> Classements joueurs</div>
+      <div class="an-players-grid">
+        <div class="an-players-col">
+          <div class="an-players-col-title">⚽ Top buteurs</div>
+          ${byPlayer.filter(p => p.goals > 0).slice(0, 5).map((p, i) => {
+            const player = State.players.find(x => x.id === p.player_id);
+            return `<div class="an-player-row">
+              <span class="an-player-rank">${i+1}</span>
+              <span class="an-player-name">${player ? player.name : '?'}</span>
+              <span class="an-player-val">${p.goals} ⚽</span>
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="an-players-col">
+          <div class="an-players-col-title">🎯 Top passeurs</div>
+          ${[...byPlayer].sort((a,b) => b.assists - a.assists).filter(p => p.assists > 0).slice(0, 5).map((p, i) => {
+            const player = State.players.find(x => x.id === p.player_id);
+            return `<div class="an-player-row">
+              <span class="an-player-rank">${i+1}</span>
+              <span class="an-player-name">${player ? player.name : '?'}</span>
+              <span class="an-player-val">${p.assists} 🎯</span>
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="an-players-col">
+          <div class="an-players-col-title">★ Meilleures notes</div>
+          ${[...byPlayer].filter(p => p.avgRating > 0).sort((a,b) => b.avgRating - a.avgRating).slice(0, 5).map((p, i) => {
+            const player = State.players.find(x => x.id === p.player_id);
+            return `<div class="an-player-row">
+              <span class="an-player-rank">${i+1}</span>
+              <span class="an-player-name">${player ? player.name : '?'}</span>
+              <span class="an-player-val" style="color:var(--accent)">${p.avgRating} ★</span>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>`;
 
   return `
     <div class="analyse-page">
-      <div class="kpi-grid">
-        <div class="kpi">
-          <div class="kpi-val">${stats.total}</div>
-          <div class="kpi-label">Matchs joués</div>
-        </div>
-        <div class="kpi">
-          <div class="kpi-val" style="color:#34d399">${stats.winRate}%</div>
-          <div class="kpi-label">Taux de victoire</div>
-        </div>
-        <div class="kpi highlight">
-          <div class="kpi-val" style="color:#a78bfa">${serie.current}</div>
-          <div class="kpi-label">Série actuelle</div>
-        </div>
-        <div class="kpi highlight">
-          <div class="kpi-val" style="color:#a78bfa">${serie.record}</div>
-          <div class="kpi-label">Meilleur record</div>
-        </div>
-      </div>
-
-      ${renderSerieBlock('Série en cours', serie.current, serie.currentMatches, 'actuelle')}
-      ${serie.record > serie.current ? renderSerieBlock('Record', serie.record, serie.recordMatches, 'record') : ''}
-
-      <!-- Bouton coaching IA -->
-      <div class="coaching-block">
-        <div class="coaching-header">
-          <div>
-            <div class="coaching-title">🤖 Coaching IA</div>
-            <div class="coaching-subtitle">Analyse ta performance et recommandations personnalisées</div>
-          </div>
-          <button class="btn-sm btn-primary" onclick="generateCoaching()" id="btn-coaching">
-            ✨ Générer
-          </button>
-        </div>
-        <div id="coaching-result"></div>
-      </div>
-
-      <div class="analyse-section-title">Performance par rang</div>
-      <div class="rank-block">
-        ${byRank.length === 0
-          ? `<div class="empty-state"><p>Aucune donnée</p></div>`
-          : byRank.map(r => `
-            <div class="rank-row">
-              <span class="rank-name">${r.rank}</span>
-              <div class="rank-bar-wrap">
-                <div class="rank-seg-w" style="width:${r.wins/r.total*100}%"></div>
-                <div class="rank-seg-d" style="width:${r.draws/r.total*100}%"></div>
-                <div class="rank-seg-l" style="width:${r.losses/r.total*100}%"></div>
-              </div>
-              <span class="rank-pct">${r.winRate}%</span>
-              <span class="rank-serie">Série: ${r.serie.record}</span>
-            </div>
-          `).join('')}
-      </div>
-    </div>
-  `;
+      ${kpiHtml}
+      ${serieHtml}
+      ${coachingHtml}
+      ${byTypeHtml}
+      ${byRankHtml}
+      ${byFormHtml}
+      ${byBuildHtml}
+      ${bestXIHtml}
+      ${topPlayersHtml}
+    </div>`;
 }
 
 function renderSerieBlock(title, count, matches, type) {
@@ -1112,9 +2398,6 @@ var _matchTitulaires = [];   // [{player_id, card_id}]
 var _matchRemplacants = [];  // [{player_id, card_id}]
 var _matchSubs = [];         // [{out_player_id, in_player_id, minute}]
 
-// Clé localStorage pour mémoriser la dernière composition
-var LINEUP_STORAGE_KEY = 'efb_last_lineup';
-
 function saveLineupToStorage() {
   try {
     localStorage.setItem(LINEUP_STORAGE_KEY, JSON.stringify({
@@ -1147,9 +2430,56 @@ function loadLineupFromStorage() {
 
 function loadSquad23IntoLineup() {
   loadSquad23();
-  // Les 12 premiers vont en titulaires (par défaut), le reste en remplaçants
-  // L'utilisateur peut les déplacer dans le modal
-  // On respecte la composition sauvegardée si elle existe
+
+  // Priorité 1 : données de l'onglet Formation (FT_STORAGE_KEY)
+  var ftData = null;
+  try {
+    var fts = localStorage.getItem(FT_STORAGE_KEY);
+    if (fts) ftData = JSON.parse(fts);
+  } catch(e) {}
+
+  if (ftData && ftData.titulaires && ftData.titulaires.some(function(t) { return t && t.player_id; })) {
+    var allPids = State.players.map(function(p) { return p.id; });
+    var allCids = Object.values(State.cards).flat().map(function(c) { return c.id; });
+
+    // Titulaires — garder l'ordre des slots, ignorer les postes vides
+    _matchTitulaires = (ftData.titulaires || [])
+      .filter(function(t) { return t && t.player_id && allPids.includes(t.player_id); })
+      .map(function(t) {
+        // Résoudre card_id si absent
+        var card_id = t.card_id && allCids.includes(t.card_id) ? t.card_id : null;
+        if (!card_id) {
+          var sq = _squad23.find(function(s) { return s.player_id === t.player_id; });
+          if (sq) card_id = sq.card_id;
+          else {
+            var cards = Object.values(State.cards).flat().filter(function(c) {
+              return State.cards[t.player_id] && State.cards[t.player_id].some(function(x) { return x.id === c.id; });
+            });
+            if (cards.length) card_id = cards[0].id;
+          }
+        }
+        var sq2 = _squad23.find(function(s) { return s.player_id === t.player_id; });
+        return { player_id: t.player_id, card_id: card_id, build_id: sq2 ? sq2.build_id : null };
+      });
+
+    _matchRemplacants = (ftData.remplacants || [])
+      .filter(function(t) { return t && t.player_id && allPids.includes(t.player_id); })
+      .map(function(t) {
+        var card_id = t.card_id && allCids.includes(t.card_id) ? t.card_id : null;
+        if (!card_id) {
+          var sq = _squad23.find(function(s) { return s.player_id === t.player_id; });
+          if (sq) card_id = sq.card_id;
+        }
+        var sq2 = _squad23.find(function(s) { return s.player_id === t.player_id; });
+        return { player_id: t.player_id, card_id: card_id, build_id: sq2 ? sq2.build_id : null };
+      });
+
+    // Pré-remplir la formation dans le modal match
+    if (ftData.formation) _matchLastFormation = ftData.formation;
+    return;
+  }
+
+  // Priorité 2 : LINEUP_STORAGE_KEY (ancien système)
   var saved = null;
   try {
     var s = localStorage.getItem(LINEUP_STORAGE_KEY);
@@ -1157,26 +2487,21 @@ function loadSquad23IntoLineup() {
   } catch(e) {}
 
   if (saved && saved.titulaires && saved.titulaires.length > 0) {
-    // Utiliser la dernière composition connue
-    var allPids = State.players.map(function(p) { return p.id; });
-    var allCids = Object.values(State.cards).flat().map(function(c) { return c.id; });
+    var allPids2 = State.players.map(function(p) { return p.id; });
+    var allCids2 = Object.values(State.cards).flat().map(function(c) { return c.id; });
     _matchTitulaires = (saved.titulaires || []).filter(function(s) {
-      return allPids.includes(s.player_id) && allCids.includes(s.card_id);
-    });
-    _matchRemplacants = (saved.remplacants || []).filter(function(s) {
-      return allPids.includes(s.player_id) && allCids.includes(s.card_id);
-    });
-    // Mettre à jour les build_id depuis Squad 23
-    _matchTitulaires = _matchTitulaires.map(function(sel) {
+      return allPids2.includes(s.player_id);
+    }).map(function(sel) {
       var sq = _squad23.find(function(s) { return s.player_id === sel.player_id; });
       return { player_id: sel.player_id, card_id: sel.card_id, build_id: sq ? sq.build_id : null };
     });
-    _matchRemplacants = _matchRemplacants.map(function(sel) {
+    _matchRemplacants = (saved.remplacants || []).filter(function(s) {
+      return allPids2.includes(s.player_id);
+    }).map(function(sel) {
       var sq = _squad23.find(function(s) { return s.player_id === sel.player_id; });
       return { player_id: sel.player_id, card_id: sel.card_id, build_id: sq ? sq.build_id : null };
     });
   } else if (_squad23.length > 0) {
-    // Première fois — répartir depuis Squad 23
     _matchTitulaires = _squad23.slice(0, 11).map(function(s) {
       return { player_id: s.player_id, card_id: s.card_id, build_id: s.build_id, played: true };
     });
@@ -1189,193 +2514,1265 @@ function loadSquad23IntoLineup() {
   }
 }
 
+// ── État modal match ──────────────────────────────────────────────────────────
+var _matchActiveTab = 'match'; // match | compo | stats | resume
+var _pitchSelectedPid = null;  // joueur sélectionné sur le terrain
+var _pitchSubMode = false;     // mode sélection remplaçant
+var _pitchSubOutPid = null;    // joueur sortant en cours
+
+// ── Formations → positions (% left, % top depuis but adverse en haut) ─────────
+// ── Formations préétablies ────────────────────────────────────────────────────
+var FORMATION_LAYOUTS = {
+  '4-3-3':     { gk:[[50,88]], def:[[15,70],[37,70],[63,70],[85,70]], mid:[[25,50],[50,47],[75,50]], att:[[18,25],[50,20],[82,25]] },
+  '4-3-3 ATT': { gk:[[50,88]], def:[[15,72],[37,72],[63,72],[85,72]], mid:[[22,52],[50,48],[78,52]], att:[[18,22],[50,17],[82,22]] },
+  '4-3-3 DEF': { gk:[[50,88]], def:[[15,68],[37,68],[63,68],[85,68]], mid:[[22,53],[50,50],[78,53]], att:[[18,28],[50,23],[82,28]] },
+  '4-4-2':     { gk:[[50,88]], def:[[15,70],[37,70],[63,70],[85,70]], mid:[[12,50],[37,50],[63,50],[88,50]], att:[[33,25],[67,25]] },
+  '4-4-2 FLAT':{ gk:[[50,88]], def:[[15,70],[37,70],[63,70],[85,70]], mid:[[12,52],[37,52],[63,52],[88,52]], att:[[33,28],[67,28]] },
+  '4-2-3-1':   { gk:[[50,88]], def:[[15,70],[37,70],[63,70],[85,70]], mid:[[33,60],[67,60],[18,40],[50,37],[82,40]], att:[[50,20]] },
+  '4-1-4-1':   { gk:[[50,88]], def:[[15,70],[37,70],[63,70],[85,70]], mid:[[50,62],[12,48],[37,48],[63,48],[88,48]], att:[[50,20]] },
+  '4-3-1-2':   { gk:[[50,88]], def:[[15,70],[37,70],[63,70],[85,70]], mid:[[22,55],[50,52],[78,55]], att:[[50,37],[33,22],[67,22]] },
+  '4-3-2-1':   { gk:[[50,88]], def:[[15,70],[37,70],[63,70],[85,70]], mid:[[22,55],[50,52],[78,55]], att:[[33,35],[67,35],[50,20]] },
+  '4-4-1-1':   { gk:[[50,88]], def:[[15,70],[37,70],[63,70],[85,70]], mid:[[12,52],[37,52],[63,52],[88,52]], att:[[50,33],[50,20]] },
+  '4-5-1':     { gk:[[50,88]], def:[[15,70],[37,70],[63,70],[85,70]], mid:[[10,50],[28,48],[50,45],[72,48],[90,50]], att:[[50,20]] },
+  '3-5-2':     { gk:[[50,88]], def:[[25,72],[50,72],[75,72]], mid:[[8,52],[28,48],[50,47],[72,48],[92,52]], att:[[33,25],[67,25]] },
+  '3-4-3':     { gk:[[50,88]], def:[[25,72],[50,72],[75,72]], mid:[[15,53],[38,53],[62,53],[85,53]], att:[[18,25],[50,20],[82,25]] },
+  '3-4-2-1':   { gk:[[50,88]], def:[[25,72],[50,72],[75,72]], mid:[[15,55],[38,55],[62,55],[85,55]], att:[[33,35],[67,35],[50,20]] },
+  '3-3-3-1':   { gk:[[50,88]], def:[[25,72],[50,72],[75,72]], mid:[[22,57],[50,55],[78,57]], att:[[18,37],[50,35],[82,37],[50,20]] },
+  '5-3-2':     { gk:[[50,88]], def:[[8,72],[27,70],[50,72],[73,70],[92,72]], mid:[[22,50],[50,47],[78,50]], att:[[33,25],[67,25]] },
+  '5-4-1':     { gk:[[50,88]], def:[[8,72],[27,70],[50,72],[73,70],[92,72]], mid:[[12,52],[37,52],[63,52],[88,52]], att:[[50,20]] },
+  '5-2-3':     { gk:[[50,88]], def:[[8,72],[27,70],[50,72],[73,70],[92,72]], mid:[[33,52],[67,52]], att:[[18,25],[50,20],[82,25]] },
+  '5-2-2-1':   { gk:[[50,88]], def:[[8,72],[27,70],[50,72],[73,70],[92,72]], mid:[[33,55],[67,55]], att:[[33,33],[67,33],[50,20]] },
+  '4-6-0':     { gk:[[50,88]], def:[[15,70],[37,70],[63,70],[85,70]], mid:[[8,50],[25,47],[42,45],[58,45],[75,47],[92,50]], att:[] },
+};
+
+var POSITION_LABELS_BY_FORMATION = {
+  '4-3-3':     ['GK','LB','CB','CB','RB','DMF','CMF','DMF','LWF','CF','RWF'],
+  '4-3-3 ATT': ['GK','LB','CB','CB','RB','DMF','CMF','AMF','LWF','CF','RWF'],
+  '4-3-3 DEF': ['GK','LB','CB','CB','RB','DMF','CMF','DMF','LWF','CF','RWF'],
+  '4-4-2':     ['GK','LB','CB','CB','RB','LMF','CMF','CMF','RMF','CF','SS'],
+  '4-4-2 FLAT':['GK','LB','CB','CB','RB','LMF','CMF','CMF','RMF','CF','SS'],
+  '4-2-3-1':   ['GK','LB','CB','CB','RB','DMF','CMF','LWF','AMF','RWF','CF'],
+  '4-1-4-1':   ['GK','LB','CB','CB','RB','DMF','LMF','AMF','AMF','RMF','CF'],
+  '4-3-1-2':   ['GK','LB','CB','CB','RB','DMF','DMF','DMF','AMF','CF','SS'],
+  '4-3-2-1':   ['GK','LB','CB','CB','RB','DMF','DMF','DMF','SS','SS','CF'],
+  '4-4-1-1':   ['GK','LB','CB','CB','RB','LMF','DMF','DMF','RMF','SS','CF'],
+  '4-5-1':     ['GK','LB','CB','CB','RB','LMF','DMF','AMF','DMF','RMF','CF'],
+  '3-5-2':     ['GK','CB','CB','CB','LMF','DMF','CMF','DMF','RMF','CF','SS'],
+  '3-4-3':     ['GK','CB','CB','CB','LMF','CMF','CMF','RMF','LWF','CF','RWF'],
+  '3-4-2-1':   ['GK','CB','CB','CB','LMF','DMF','DMF','RMF','SS','SS','CF'],
+  '3-3-3-1':   ['GK','CB','CB','CB','DMF','DMF','DMF','LWF','CF','RWF','CF'],
+  '5-3-2':     ['GK','LB','CB','CB','CB','RB','DMF','AMF','DMF','CF','SS'],
+  '5-4-1':     ['GK','LB','CB','CB','CB','RB','LMF','DMF','DMF','RMF','CF'],
+  '5-2-3':     ['GK','LB','CB','CB','CB','RB','DMF','DMF','LWF','CF','RWF'],
+  '5-2-2-1':   ['GK','LB','CB','CB','CB','RB','DMF','DMF','SS','SS','CF'],
+  '4-6-0':     ['GK','LB','CB','CB','RB','LMF','DMF','AMF','AMF','DMF','RMF'],
+};
+
+// ── Formations personnalisées (localStorage) ──────────────────────────────────
+var CUSTOM_FORMATIONS_KEY = 'efb_custom_formations';
+
+function loadCustomFormations() {
+  try {
+    var data = localStorage.getItem(CUSTOM_FORMATIONS_KEY);
+    return data ? JSON.parse(data) : {};
+  } catch(e) { return {}; }
+}
+
+function saveCustomFormation(name, slots) {
+  try {
+    var customs = loadCustomFormations();
+    // Stocker comme layout plat : [{left, top, label}]
+    customs[name] = { slots: slots, custom: true };
+    localStorage.setItem(CUSTOM_FORMATIONS_KEY, JSON.stringify(customs));
+    // Injecter dans FORMATION_LAYOUTS pour utilisation immédiate
+    injectCustomFormation(name, slots);
+  } catch(e) {}
+}
+
+function deleteCustomFormation(name) {
+  try {
+    var customs = loadCustomFormations();
+    delete customs[name];
+    localStorage.setItem(CUSTOM_FORMATIONS_KEY, JSON.stringify(customs));
+    delete FORMATION_LAYOUTS[name];
+    delete POSITION_LABELS_BY_FORMATION[name];
+  } catch(e) {}
+}
+
+function injectCustomFormation(name, slots) {
+  // Ne pas écraser les formations builtin
+  var isBuiltin = FORMATION_LAYOUTS[name] && !FORMATION_LAYOUTS[name]._custom_slots;
+  if (isBuiltin) {
+    // Stocker sous un nom alternatif avec suffixe
+    var altName = name + ' (perso)';
+    FORMATION_LAYOUTS[altName] = { _custom_slots: slots };
+    POSITION_LABELS_BY_FORMATION[altName] = slots.map(function(s) { return s.label || '?'; });
+    return;
+  }
+  FORMATION_LAYOUTS[name] = { _custom_slots: slots };
+  POSITION_LABELS_BY_FORMATION[name] = slots.map(function(s) { return s.label || '?'; });
+}
+
+function loadAllCustomFormations() {
+  var customs = loadCustomFormations();
+  Object.keys(customs).forEach(function(name) {
+    injectCustomFormation(name, customs[name].slots);
+  });
+}
+
+function getFormationLayout(formation) {
+  if (!formation) return null;
+  var f = formation.trim();
+  if (FORMATION_LAYOUTS[f]) return FORMATION_LAYOUTS[f];
+  var normalized = f.replace(/\s/g,'');
+  if (FORMATION_LAYOUTS[normalized]) return FORMATION_LAYOUTS[normalized];
+  return null;
+}
+
+function buildPitchSlots(formation) {
+  var layout = getFormationLayout(formation);
+  if (!layout) return null;
+
+  // Formation custom → slots directs
+  if (layout._custom_slots) {
+    return layout._custom_slots.map(function(s, i) {
+      return { idx: i, label: s.label || '?', left: s.left, top: s.top };
+    });
+  }
+
+  var slots = [];
+  var labels = POSITION_LABELS_BY_FORMATION[formation.trim()] || [];
+  var idx = 0;
+  ['gk','def','mid','att'].forEach(function(group) {
+    (layout[group] || []).forEach(function(pct) {
+      slots.push({ idx: idx, label: labels[idx] || '?', left: pct[0], top: pct[1] });
+      idx++;
+    });
+  });
+  return slots;
+}
+
+// ── Modal Picker de formations ────────────────────────────────────────────────
+function openFormationPicker() {
+  loadAllCustomFormations();
+  var customs = loadCustomFormations();
+  var customNames = Object.keys(customs);
+  var builtinNames = Object.keys(FORMATION_LAYOUTS).filter(function(k) { return !FORMATION_LAYOUTS[k]._custom_slots; });
+  var q = String.fromCharCode(39);
+
+  var html = '<div class="fmpicker-overlay" id="fmpicker-overlay" onclick="closeFmPickerIfBg(event)">' +
+    '<div class="fmpicker-panel">' +
+      '<div class="fmpicker-header">' +
+        '<span class="fmpicker-title">Choisir une formation</span>' +
+        '<div style="display:flex;gap:6px">' +
+          '<button class="btn-sm btn-primary" onclick="openFormationEditor(null)"><i class="ti ti-plus"></i> Créer</button>' +
+          '<button class="btn-icon" onclick="closeFmPicker()"><i class="ti ti-x"></i></button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="fmpicker-body">' +
+        // Formations custom en premier
+        (customNames.length > 0 ? (
+          '<div class="fmpicker-group-title">Mes formations</div>' +
+          '<div class="fmpicker-grid">' +
+          customNames.map(function(name) {
+            return renderFormationCard(name, true);
+          }).join('') +
+          '</div>'
+        ) : '') +
+        '<div class="fmpicker-group-title">Formations standard</div>' +
+        '<div class="fmpicker-grid">' +
+          builtinNames.map(function(name) {
+            return renderFormationCard(name, false);
+          }).join('') +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+
+  var overlay = document.createElement('div');
+  overlay.id = 'fmpicker-root';
+  overlay.innerHTML = html;
+  document.body.appendChild(overlay);
+}
+
+function renderFormationCard(name, isCustom) {
+  var q = String.fromCharCode(39);
+  var slots = buildPitchSlots(name);
+  if (!slots) return '';
+  var miniSvg = renderMiniPitchSVG(slots);
+  return '<div class="fmpicker-card" onclick="selectFormation(' + q + name.replace(/'/g,"\\'") + q + ')">' +
+    miniSvg +
+    '<div class="fmpicker-card-name">' + name + (isCustom ? ' <span class="badge-custom">Perso</span>' : '') + '</div>' +
+    (isCustom ? '<button class="fmpicker-delete" onclick="deleteCustomFm(event,' + q + name.replace(/'/g,"\\'") + q + ')" title="Supprimer"><i class="ti ti-trash"></i></button>' : '') +
+  '</div>';
+}
+
+function renderMiniPitchSVG(slots) {
+  var W = 70; var H = 90;
+  var nodes = slots.map(function(s) {
+    var cx = Math.round(s.left / 100 * W);
+    var cy = Math.round(s.top / 100 * H);
+    return '<circle cx="' + cx + '" cy="' + cy + '" r="4" fill="#60a5fa" opacity="0.9"/>';
+  }).join('');
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" style="display:block">' +
+    '<rect x="0" y="0" width="' + W + '" height="' + H + '" rx="4" fill="#1a3a1a"/>' +
+    '<line x1="4" y1="' + (H/2) + '" x2="' + (W-4) + '" y2="' + (H/2) + '" stroke="rgba(255,255,255,0.1)" stroke-width="0.5"/>' +
+    '<rect x="4" y="4" width="' + (W-8) + '" height="' + (H-8) + '" rx="3" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="0.5"/>' +
+    nodes +
+  '</svg>';
+}
+
+function selectFormation(name) {
+  _matchLastFormation = name;
+  // Mettre à jour les deux inputs de formation
+  var fEl = document.getElementById('m-formation');
+  if (fEl) fEl.value = name;
+  var fqEl = document.getElementById('m-formation-quick');
+  if (fqEl) fqEl.value = name;
+  closeFmPicker();
+  // Re-render le terrain
+  onFormationInput(name);
+  // Si terrain pas encore visible, re-render tout l'onglet
+  var pitchCol = document.querySelector('.match-pitch-col');
+  if (pitchCol && !pitchCol.querySelector('svg')) {
+    var el = document.getElementById('match-tab-content');
+    if (el) el.innerHTML = renderMatchTabMain();
+  }
+}
+
+function closeFmPicker() {
+  var root = document.getElementById('fmpicker-root');
+  if (root) root.remove();
+}
+
+function closeFmPickerIfBg(e) {
+  if (e.target.id === 'fmpicker-overlay') closeFmPicker();
+}
+
+function deleteCustomFm(e, name) {
+  e.stopPropagation();
+  if (!confirm('Supprimer la formation "' + name + '" ?')) return;
+  deleteCustomFormation(name);
+  closeFmPicker();
+  openFormationPicker();
+}
+
+// ── Éditeur de formation (drag & drop SVG) ────────────────────────────────────
+var _fmEditorSlots = [];      // [{idx, label, left, top}]
+var _fmEditorDragging = null; // idx du nœud en cours de drag
+var _fmEditorBaseName = '';
+
+function openFormationEditor(baseName) {
+  loadAllCustomFormations();
+  _fmEditorBaseName = baseName || '';
+  var customs = loadCustomFormations();
+
+  if (baseName && FORMATION_LAYOUTS[baseName]) {
+    // Partir d'une base existante
+    var slots = buildPitchSlots(baseName);
+    _fmEditorSlots = slots.map(function(s) {
+      return { idx: s.idx, label: s.label, left: s.left, top: s.top };
+    });
+  } else {
+    // Formation vide — 4-3-3 par défaut
+    var defaultSlots = buildPitchSlots('4-3-3');
+    _fmEditorSlots = defaultSlots.map(function(s) {
+      return { idx: s.idx, label: s.label, left: s.left, top: s.top };
+    });
+  }
+
+  closeFmPicker();
+  renderFmEditor();
+}
+
+function renderFmEditor() {
+  var existing = document.getElementById('fmeditor-root');
+  if (existing) existing.remove();
+
+  var customs = loadCustomFormations();
+  var q = String.fromCharCode(39);
+
+  var html = '<div class="fmeditor-overlay" id="fmeditor-overlay">' +
+    '<div class="fmeditor-panel">' +
+      '<div class="fmeditor-header">' +
+        '<span class="fmeditor-title">Éditeur de formation</span>' +
+        '<button class="btn-icon" onclick="closeFmEditor()"><i class="ti ti-x"></i></button>' +
+      '</div>' +
+      '<div class="fmeditor-body">' +
+        '<div class="fmeditor-pitch-wrap">' +
+          '<div id="fmeditor-pitch">' + renderEditorPitchSVG() + '</div>' +
+          '<p class="fmeditor-hint"><i class="ti ti-drag-drop"></i> Glisse les joueurs pour repositionner</p>' +
+        '</div>' +
+        '<div class="fmeditor-controls">' +
+          '<div class="fmeditor-slots-list" id="fmeditor-slots-list">' + renderEditorSlotsList() + '</div>' +
+          '<div class="fmeditor-save-row">' +
+            '<div class="form-group" style="flex:1"><label>Nom de la formation</label>' +
+              '<input type="text" id="fmeditor-name" class="form-input" placeholder="ex: Mon 4-3-3 offensif" value="' + (_fmEditorBaseName || '') + '">' +
+            '</div>' +
+          '</div>' +
+          '<div style="display:flex;gap:8px;margin-top:10px">' +
+            '<button class="btn-sm btn-ghost" style="flex:1" onclick="closeFmEditor()">Annuler</button>' +
+            '<button class="btn-sm btn-ghost" style="flex:1" onclick="fmEditorReset()"><i class="ti ti-refresh"></i> Réinitialiser</button>' +
+            '<button class="btn-sm btn-primary" style="flex:1" onclick="saveFmEditor()"><i class="ti ti-check"></i> Enregistrer</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+
+  var root = document.createElement('div');
+  root.id = 'fmeditor-root';
+  root.innerHTML = html;
+  document.body.appendChild(root);
+
+  // Bind drag events après insertion
+  setTimeout(bindFmEditorDrag, 50);
+}
+
+function renderEditorPitchSVG() {
+  var W = 220; var H = 340;
+  var nodes = _fmEditorSlots.map(function(s) {
+    var cx = Math.round(s.left / 100 * W);
+    var cy = Math.round(s.top / 100 * H);
+    return '<g class="fmeditor-node" data-idx="' + s.idx + '" style="cursor:grab">' +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="16" fill="#1e3a5f" stroke="#60a5fa" stroke-width="1.5"/>' +
+      '<text x="' + cx + '" y="' + (cy+3) + '" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">' + s.label + '</text>' +
+      '<text x="' + cx + '" y="' + (cy+16+9) + '" text-anchor="middle" font-size="7" fill="#a0c4ff">' + s.label + '</text>' +
+    '</g>';
+  }).join('');
+
+  return '<svg id="fmeditor-svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '" style="display:block;touch-action:none">' +
+    '<rect x="0" y="0" width="' + W + '" height="' + H + '" rx="8" fill="#1a3a1a"/>' +
+    '<rect x="8" y="8" width="' + (W-16) + '" height="' + (H-16) + '" rx="4" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>' +
+    '<line x1="8" y1="' + (H/2) + '" x2="' + (W-8) + '" y2="' + (H/2) + '" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>' +
+    '<circle cx="' + (W/2) + '" cy="' + (H/2) + '" r="28" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>' +
+    '<rect x="' + (W/2-30) + '" y="8" width="60" height="36" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
+    '<rect x="' + (W/2-30) + '" y="' + (H-44) + '" width="60" height="36" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
+    nodes +
+  '</svg>';
+}
+
+function renderEditorSlotsList() {
+  var q = String.fromCharCode(39);
+  return '<div style="font-size:10px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.6px">Labels de position</div>' +
+  '<div style="display:flex;flex-wrap:wrap;gap:4px">' +
+    _fmEditorSlots.map(function(s) {
+      return '<input type="text" value="' + s.label + '" maxlength="4" ' +
+        'style="width:46px;padding:4px 6px;font-size:11px;text-align:center;background:var(--surface3);border:0.5px solid var(--border);border-radius:4px;color:var(--text)" ' +
+        'oninput="updateFmSlotLabel(' + s.idx + ',this.value)" ' +
+        'title="Poste #' + (s.idx+1) + '">';
+    }).join('') +
+  '</div>';
+}
+
+function updateFmSlotLabel(idx, val) {
+  var slot = _fmEditorSlots.find(function(s) { return s.idx === idx; });
+  if (slot) slot.label = val.toUpperCase();
+  // Mettre à jour le texte dans le SVG sans re-render complet
+  var svg = document.getElementById('fmeditor-svg');
+  if (svg) {
+    var node = svg.querySelector('[data-idx="' + idx + '"]');
+    if (node) {
+      var texts = node.querySelectorAll('text');
+      texts.forEach(function(t) { t.textContent = val.toUpperCase(); });
+    }
+  }
+}
+
+function bindFmEditorDrag() {
+  var svg = document.getElementById('fmeditor-svg');
+  if (!svg) return;
+  var W = 220; var H = 340;
+
+  function getPos(e) {
+    var rect = svg.getBoundingClientRect();
+    var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return {
+      x: Math.max(8, Math.min(W-8, (clientX - rect.left) / rect.width * W)),
+      y: Math.max(8, Math.min(H-8, (clientY - rect.top) / rect.height * H))
+    };
+  }
+
+  svg.querySelectorAll('.fmeditor-node').forEach(function(node) {
+    var idx = parseInt(node.getAttribute('data-idx'));
+
+    function onStart(e) {
+      e.preventDefault();
+      _fmEditorDragging = idx;
+      node.style.cursor = 'grabbing';
+      node.querySelector('circle').setAttribute('stroke', '#f59e0b');
+      node.querySelector('circle').setAttribute('stroke-width', '2.5');
+    }
+    node.addEventListener('mousedown', onStart);
+    node.addEventListener('touchstart', onStart, { passive: false });
+  });
+
+  function onMove(e) {
+    if (_fmEditorDragging === null) return;
+    e.preventDefault();
+    var pos = getPos(e);
+    var slot = _fmEditorSlots.find(function(s) { return s.idx === _fmEditorDragging; });
+    if (!slot) return;
+    slot.left = Math.round(pos.x / W * 100 * 10) / 10;
+    slot.top  = Math.round(pos.y / H * 100 * 10) / 10;
+    // Déplacer le nœud dans le SVG
+    var node = svg.querySelector('[data-idx="' + _fmEditorDragging + '"]');
+    if (node) {
+      var circle = node.querySelector('circle');
+      var texts = node.querySelectorAll('text');
+      circle.setAttribute('cx', Math.round(pos.x));
+      circle.setAttribute('cy', Math.round(pos.y));
+      if (texts[0]) { texts[0].setAttribute('x', Math.round(pos.x)); texts[0].setAttribute('y', Math.round(pos.y)+3); }
+      if (texts[1]) { texts[1].setAttribute('x', Math.round(pos.x)); texts[1].setAttribute('y', Math.round(pos.y)+25); }
+    }
+  }
+
+  function onEnd(e) {
+    if (_fmEditorDragging === null) return;
+    var draggedIdx = _fmEditorDragging;
+    var node = svg.querySelector('[data-idx="' + draggedIdx + '"]');
+    if (node) {
+      node.style.cursor = 'grab';
+      node.querySelector('circle').setAttribute('stroke', '#60a5fa');
+      node.querySelector('circle').setAttribute('stroke-width', '1.5');
+    }
+    _fmEditorDragging = null;
+
+    // Détecter la position selon la zone et afficher le picker
+    var slot = _fmEditorSlots.find(function(s) { return s.idx === draggedIdx; });
+    if (!slot) return;
+    var suggestions = detectPositionSuggestions(slot.left, slot.top);
+
+    // Afficher picker inline dans l'éditeur
+    showFmEditorPositionPicker(draggedIdx, suggestions, slot.left, slot.top);
+  }
+
+  svg.addEventListener('mousemove', onMove);
+  svg.addEventListener('touchmove', onMove, { passive: false });
+  svg.addEventListener('mouseup', onEnd);
+  svg.addEventListener('touchend', onEnd);
+  document.addEventListener('mouseup', onEnd);
+}
+
+function showFmEditorPositionPicker(slotIdx, suggestions, leftPct, topPct) {
+  var existing = document.getElementById('fmeditor-pos-picker');
+  if (existing) existing.remove();
+
+  var svg = document.getElementById('fmeditor-svg');
+  if (!svg) return;
+  var rect = svg.getBoundingClientRect();
+  var x = rect.left + leftPct / 100 * rect.width;
+  var y = rect.top  + topPct  / 100 * rect.height;
+
+  var picker = document.createElement('div');
+  picker.id = 'fmeditor-pos-picker';
+  picker.style.cssText = 'position:fixed;z-index:500;background:var(--surface);border:0.5px solid var(--accent);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:4px;box-shadow:0 4px 20px rgba(0,0,0,0.6)';
+  picker.style.left = Math.min(x + 24, window.innerWidth - 150) + 'px';
+  picker.style.top  = Math.max(y - 80, 60) + 'px';
+
+  var label = document.createElement('div');
+  label.style.cssText = 'font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;padding:2px 4px';
+  label.textContent = 'Position';
+  picker.appendChild(label);
+
+  suggestions.forEach(function(pos) {
+    var btn = document.createElement('button');
+    btn.style.cssText = 'padding:5px 16px;border-radius:5px;border:0.5px solid var(--border);background:var(--surface3);color:var(--text);font-size:12px;font-weight:600;cursor:pointer';
+    btn.textContent = pos;
+    btn.onmouseenter = function() { btn.style.background = 'var(--accent)'; btn.style.color = '#fff'; };
+    btn.onmouseleave = function() { btn.style.background = 'var(--surface3)'; btn.style.color = 'var(--text)'; };
+    btn.onclick = function() {
+      // Mettre à jour le label du slot
+      var slot = _fmEditorSlots.find(function(s) { return s.idx === slotIdx; });
+      if (slot) slot.label = pos;
+      picker.remove();
+      // Mettre à jour le texte dans le SVG
+      var svgEl = document.getElementById('fmeditor-svg');
+      if (svgEl) {
+        var nodeEl = svgEl.querySelector('[data-idx="' + slotIdx + '"]');
+        if (nodeEl) {
+          var texts = nodeEl.querySelectorAll('text');
+          if (texts[0]) texts[0].textContent = pos;
+          if (texts[1]) texts[1].textContent = pos;
+        }
+      }
+      // Mettre à jour l'input label correspondant
+      var inputs = document.querySelectorAll('#fmeditor-slots-list input');
+      if (inputs[slotIdx]) inputs[slotIdx].value = pos;
+    };
+    picker.appendChild(btn);
+  });
+
+  var cancel = document.createElement('button');
+  cancel.style.cssText = 'padding:4px 16px;border-radius:5px;border:none;background:none;color:var(--muted);font-size:11px;cursor:pointer';
+  cancel.textContent = '✕ Garder';
+  cancel.onclick = function() { picker.remove(); };
+  picker.appendChild(cancel);
+
+  document.body.appendChild(picker);
+
+  setTimeout(function() {
+    document.addEventListener('mousedown', function closePicker(ev) {
+      if (!picker.contains(ev.target)) {
+        picker.remove();
+        document.removeEventListener('mousedown', closePicker);
+      }
+    });
+  }, 100);
+}
+
+function fmEditorReset() {
+  var base = _fmEditorBaseName || '4-3-3';
+  var slots = buildPitchSlots(base);
+  if (slots) {
+    _fmEditorSlots = slots.map(function(s) {
+      return { idx: s.idx, label: s.label, left: s.left, top: s.top };
+    });
+  }
+  var pitchEl = document.getElementById('fmeditor-pitch');
+  if (pitchEl) pitchEl.innerHTML = renderEditorPitchSVG();
+  var listEl = document.getElementById('fmeditor-slots-list');
+  if (listEl) listEl.innerHTML = renderEditorSlotsList();
+  setTimeout(bindFmEditorDrag, 50);
+}
+
+function saveFmEditor() {
+  var name = (document.getElementById('fmeditor-name')?.value || '').trim();
+  if (!name) { alert('Donne un nom à ta formation'); return; }
+  saveCustomFormation(name, _fmEditorSlots.map(function(s) {
+    return { idx: s.idx, label: s.label, left: s.left, top: s.top };
+  }));
+  closeFmEditor();
+  // Appliquer directement
+  selectFormation(name);
+}
+
+function closeFmEditor() {
+  var root = document.getElementById('fmeditor-root');
+  if (root) root.remove();
+}
+
 function renderModalAddMatch(buildId) {
-  const allBuilds = Object.values(State.builds).flat();
-  const allPlayers = State.players;
   _matchPlayerStats = {};
   _matchSubs = [];
-  // Charger la Squad 23 dans titulaires/remplaçants
+  _matchActiveTab = 'match';
+  _pitchSelectedPid = null;
+  _pitchSubMode = false;
+  _pitchSubOutPid = null;
   loadSquad23IntoLineup();
-  // Auto-init stats + instructions
   initMatchPlayerStatsFromLineup();
   setTimeout(applyLastInstructions, 80);
 
-  const now = new Date();
-  const todayDate = now.toISOString().split('T')[0];
-  const nowTime = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+  var now = new Date();
+  var todayDate = now.toISOString().split('T')[0];
+  var nowTime = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+  var q = String.fromCharCode(39);
 
-  return `
-    <div class="modal modal-lg">
-      <div class="modal-header">
-        <h3>Enregistrer un match</h3>
-        <button class="btn-icon" onclick="closeModal()"><i class="ti ti-x"></i></button>
-      </div>
-      <div class="modal-body">
+  var tabs = [{ id:'match', label:'Match' }, { id:'resume', label:'Résumé' }];
+  var tabNav = '<div class="match-modal-tabs">' +
+    tabs.map(function(t) {
+      return '<button class="match-modal-tab' + (_matchActiveTab === t.id ? ' active' : '') + '" onclick="switchMatchTab(' + q + t.id + q + ')">' + t.label + '</button>';
+    }).join('') +
+  '</div>';
 
-        <!-- Infos générales -->
-        <div class="form-row">
-          <div class="form-group">
-            <label>Adversaire</label>
-            <input type="text" id="m-opp-name" class="form-input" placeholder="ex: FC Barcelona">
-          </div>
-          <div class="form-group">
-            <label>Type de match</label>
-            <select id="m-match-type" class="form-input">
-              <option value="ligue_jcj_d1">🏆 Ligue JCJ D1</option>
-              <option value="ligue_jcj_d2">🏆 Ligue JCJ D2</option>
-              <option value="ligue_jcj_d3">🏆 Ligue JCJ D3</option>
-              <option value="ligue_ia_d1">🤖 Ligue IA D1</option>
-              <option value="ligue_ia_d2">🤖 Ligue IA D2</option>
-              <option value="ligue_ia_d3">🤖 Ligue IA D3</option>
-              <option value="event_jcj">🎯 Évènement JCJ</option>
-              <option value="event_ia">🎯 Évènement IA</option>
-              <option value="amical">🤝 Amical</option>
-              <option value="my_league">⚽ My League</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Rang</label>
-            <select id="m-match-rank" class="form-input">
-              ${EFB_RANKS.map(r => `<option value="${r}">${r}</option>`).join('')}
-            </select>
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Date</label>
-            <input type="date" id="m-match-date" class="form-input" value="${todayDate}">
-          </div>
-          <div class="form-group">
-            <label>Heure</label>
-            <input type="time" id="m-match-time" class="form-input" value="${nowTime}">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Notre formation</label>
-            <input type="text" id="m-formation" class="form-input" placeholder="ex: 4-3-3">
-          </div>
-          <div class="form-group">
-            <label>Formation adverse</label>
-            <input type="text" id="m-opp-formation" class="form-input" placeholder="ex: 4-4-2">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Mon rang</label>
-            <input type="number" id="m-my-rank" class="form-input" placeholder="ex: 1250">
-          </div>
-          <div class="form-group">
-            <label>Rang adverse</label>
-            <input type="number" id="m-opp-rank" class="form-input" placeholder="ex: 1380">
-          </div>
-        </div>
+  return '<div class="modal-match-fullscreen">' +
+    '<div class="modal-header">' +
+      '<h3>Enregistrer un match</h3>' +
+      '<button class="btn-icon" onclick="closeModal()"><i class="ti ti-x"></i></button>' +
+    '</div>' +
+    '<input type="hidden" id="m-match-date" value="' + todayDate + '">' +
+    '<input type="hidden" id="m-match-time" value="' + nowTime + '">' +
+    '<input type="hidden" id="m-match-result" value="">' +
+    tabNav +
+    '<div class="modal-match-body" id="match-tab-content">' + renderMatchTabContent() + '</div>' +
+    '<div class="modal-footer">' +
+      '<button class="btn-sm btn-ghost" onclick="closeModal()">Annuler</button>' +
+      '<button class="btn-sm btn-primary" onclick="saveMatch()"><i class="ti ti-device-floppy"></i> Enregistrer</button>' +
+    '</div>' +
+  '</div>';
+}
 
-        <!-- Résultat -->
-        <div class="form-section-title">Résultat</div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Résultat</label>
-            <div class="result-selector">
-              <button class="result-btn" data-val="V" onclick="selectResult('V')">Victoire</button>
-              <button class="result-btn" data-val="N" onclick="selectResult('N')">Nul</button>
-              <button class="result-btn" data-val="D" onclick="selectResult('D')">Défaite</button>
-            </div>
-            <input type="hidden" id="m-match-result" value="">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Buts marqués</label>
-            <input type="number" id="m-score-for" class="form-input" min="0" value="0">
-          </div>
-          <div class="form-group">
-            <label>Buts encaissés</label>
-            <input type="number" id="m-score-against" class="form-input" min="0" value="0">
-          </div>
-        </div>
+var _matchLastFormation = '';
 
-        <!-- Titulaires -->
-        <div class="form-section-title">🟢 Titulaires (11)</div>
-        <div id="m-titu-list">${renderMatchGroupList(_matchTitulaires, true)}</div>
+function renderMatchTabContent() {
+  if (_matchActiveTab === 'match')  return renderMatchTabMain();
+  if (_matchActiveTab === 'resume') return renderMatchTabResume();
+  return '';
+}
 
-        <!-- Remplaçants -->
-        <div class="form-section-title">🔄 Remplaçants</div>
-        <div id="m-rempl-list">${renderMatchGroupList(_matchRemplacants, false)}</div>
+function switchMatchTab(tab) {
+  _matchActiveTab = tab;
+  var el = document.getElementById('match-tab-content');
+  if (el) el.innerHTML = renderMatchTabContent();
+  document.querySelectorAll('.match-modal-tab').forEach(function(b) {
+    b.classList.toggle('active', b.textContent.trim() === (tab === 'match' ? 'Match' : 'Résumé'));
+  });
+  if (tab === 'match') setTimeout(applyLastInstructions, 50);
+}
 
-        <!-- Substitutions -->
-        <div class="form-section-title">🔄 Substitutions</div>
-        <div id="m-subs-list">${renderMatchSubsList()}</div>
-        <button class="btn-sm btn-ghost" style="width:100%;margin-bottom:8px" onclick="addMatchSub()">
-          + Ajouter substitution
-        </button>
+function renderMatchTabMain() {
+  var q = String.fromCharCode(39);
+  var savedFormation = _matchLastFormation || '';
+  var slots = savedFormation ? buildPitchSlots(savedFormation) : null;
+  var hasPitch = !!(slots && slots.length === 11);
 
-        <!-- Instructions -->
-        <div class="form-section-title">Instructions individuelles</div>
-        <div class="instructions-grid">
-          ${['attack1','attack2','defence1','defence2'].map(slot => {
-            const isAttack = slot.startsWith('attack');
-            const options = isAttack ? EFB_ATTACK_INSTRUCTIONS : EFB_DEFENCE_INSTRUCTIONS;
-            const label = slot === 'attack1' ? 'Attack 1' : slot === 'attack2' ? 'Attack 2'
-                        : slot === 'defence1' ? 'Defence 1' : 'Defence 2';
-            return `
-              <div class="instruction-slot">
-                <div class="instruction-slot-title">${label}</div>
-                <select id="m-${slot}-instruction" class="form-input form-input-sm">
-                  ${options.map(o => `<option value="${o}">${o}</option>`).join('')}
-                </select>
-                <select id="m-${slot}-target" class="form-input form-input-sm">
-                  <option value="">Targeted Player</option>
-                  ${allPlayers.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
-                </select>
-              </div>
-            `;
-          }).join('')}
-        </div>
+  var leftCol = '<div class="match-pitch-col">';
+  if (hasPitch) {
+    leftCol += '<div class="pitch-formation-label">' + savedFormation + '</div>';
+    leftCol += renderPitchSVG(slots, savedFormation);
+    leftCol += '<div class="pitch-legend">' +
+      '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="border-color:#60a5fa"></span>Titulaire</span>' +
+      '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="border-color:#34d399"></span>Remplacé</span>' +
+      '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="background:#2d1f4e;border-color:#a78bfa"></span>Stats</span>' +
+    '</div>';
+  } else {
+    leftCol += '<div class="pitch-placeholder">' +
+      '<i class="ti ti-ball-football" style="font-size:48px;color:var(--border)"></i>' +
+      '<p>Entre ta formation<br>pour voir le terrain</p>' +
+      '<input type="text" id="m-formation-quick" class="form-input" style="width:100px;text-align:center;margin-top:8px" placeholder="4-3-3" oninput="onFormationQuickInput(this.value)">' +
+    '</div>';
+  }
+  leftCol += '</div>';
 
-        <!-- Stats joueurs -->
-        <div class="form-section-title">Stats individuelles par joueur</div>
-        <div id="match-player-stats-list">${renderMatchPlayerStatsListV2()}</div>
-        <button class="btn-sm btn-ghost" style="width:100%;margin-bottom:8px" onclick="addMatchPlayerStat()">
-          + Ajouter un joueur
-        </button>
+  var rightCol = '<div class="match-info-col" id="match-info-col">' +
+    '<div class="match-info-top">';
 
-        <!-- Homme du match + note -->
-        <div class="form-row">
-          <div class="form-group">
-            <label>🏅 Homme du match</label>
-            <select id="m-man-of-match" class="form-input">
-              <option value="">— Aucun —</option>
-              ${allPlayers.map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Note globale (1-5)</label>
-            <select id="m-note" class="form-input">
-              <option value="3">3 — Moyen</option>
-              <option value="1">1 — Très mauvais</option>
-              <option value="2">2 — Mauvais</option>
-              <option value="4">4 — Bon</option>
-              <option value="5">5 — Excellent</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="checkbox-label">
-            <input type="checkbox" id="m-repeated-opponent">
-            Adversaire répétitif
-          </label>
-        </div>
+  rightCol += '<div class="match-score-block">' +
+    '<div class="match-score-team">' +
+      '<div class="match-score-team-name">Real Madrid</div>' +
+      '<input type="number" id="m-score-for" class="match-score-input" min="0" value="0">' +
+    '</div>' +
+    '<div class="match-score-mid">' +
+      '<input type="text" id="m-opp-name" class="match-opp-input" placeholder="Adversaire...">' +
+      '<div class="result-selector" style="margin-top:6px">' +
+        '<button class="result-btn" data-val="V" onclick="selectResult(' + q + 'V' + q + ')">V</button>' +
+        '<button class="result-btn" data-val="N" onclick="selectResult(' + q + 'N' + q + ')">N</button>' +
+        '<button class="result-btn" data-val="D" onclick="selectResult(' + q + 'D' + q + ')">D</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="match-score-team">' +
+      '<div class="match-score-team-name">Adversaire</div>' +
+      '<input type="number" id="m-score-against" class="match-score-input" min="0" value="0">' +
+    '</div>' +
+  '</div>';
 
-      </div>
-      <div class="modal-footer">
-        <button class="btn-sm btn-ghost" onclick="closeModal()">Annuler</button>
-        <button class="btn-sm btn-primary" onclick="saveMatch()">Enregistrer</button>
-      </div>
-    </div>
-  `;
+  rightCol += '<div class="match-infos-compact">' +
+    '<div class="mic-row">' +
+      '<div class="form-group" style="flex:1"><label>Type</label><select id="m-match-type" class="form-input form-input-sm">' +
+        '<option value="ligue_jcj_d1">🏆 Ligue JCJ D1</option>' +
+        '<option value="ligue_jcj_d2">🏆 Ligue JCJ D2</option>' +
+        '<option value="ligue_jcj_d3">🏆 Ligue JCJ D3</option>' +
+        '<option value="ligue_ia_d1">🤖 Ligue IA D1</option>' +
+        '<option value="ligue_ia_d2">🤖 Ligue IA D2</option>' +
+        '<option value="ligue_ia_d3">🤖 Ligue IA D3</option>' +
+        '<option value="event_jcj">🎯 Évènement JCJ</option>' +
+        '<option value="event_ia">🎯 Évènement IA</option>' +
+        '<option value="amical">🤝 Amical</option>' +
+        '<option value="my_league">⚽ My League</option>' +
+      '</select></div>' +
+      '<div class="form-group" style="flex:1"><label>Rang</label><select id="m-match-rank" class="form-input form-input-sm">' +
+        EFB_RANKS.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('') +
+      '</select></div>' +
+    '</div>' +
+    '<div class="mic-row">' +
+      '<div class="form-group" style="flex:1"><label>Notre formation</label>' +
+        '<div style="display:flex;gap:4px">' +
+          '<input type="text" id="m-formation" class="form-input form-input-sm" placeholder="4-3-3" value="' + savedFormation + '" oninput="onFormationInput(this.value)" style="flex:1">' +
+          '<button class="btn-sm btn-ghost" onclick="openFormationPicker()" title="Choisir formation" style="padding:4px 8px;flex-shrink:0"><i class="ti ti-ball-football"></i></button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="form-group" style="flex:1"><label>Formation adv.</label><input type="text" id="m-opp-formation" class="form-input form-input-sm" placeholder="4-4-2"></div>' +
+    '</div>' +
+    '<div class="mic-row">' +
+      '<div class="form-group" style="flex:1"><label>Mon rang pts</label><input type="number" id="m-my-rank" class="form-input form-input-sm" placeholder="1250"></div>' +
+      '<div class="form-group" style="flex:1"><label>Rang adv. pts</label><input type="number" id="m-opp-rank" class="form-input form-input-sm" placeholder="1380"></div>' +
+    '</div>' +
+    '<div class="mic-row">' +
+      '<div class="form-group" style="flex:1"><label>Date</label><input type="date" id="m-match-date-vis" class="form-input form-input-sm" value="' + new Date().toISOString().split('T')[0] + '" oninput="document.getElementById(' + q + 'm-match-date' + q + ').value=this.value"></div>' +
+      '<div class="form-group" style="flex:1"><label>Heure</label><input type="time" id="m-match-time-vis" class="form-input form-input-sm" value="' + String(new Date().getHours()).padStart(2,'0') + ':' + String(new Date().getMinutes()).padStart(2,'0') + '" oninput="document.getElementById(' + q + 'm-match-time' + q + ').value=this.value"></div>' +
+    '</div>' +
+  '</div>';
+
+  rightCol += '<details class="match-instructions-details">' +
+    '<summary class="match-instructions-summary"><i class="ti ti-list-details"></i> Instructions individuelles</summary>' +
+    '<div class="instructions-grid" style="margin-top:8px">' +
+      ['attack1','attack2','defence1','defence2'].map(function(slot) {
+        var isAttack = slot.startsWith('attack');
+        var options = isAttack ? EFB_ATTACK_INSTRUCTIONS : EFB_DEFENCE_INSTRUCTIONS;
+        var label = slot === 'attack1' ? 'Attack 1' : slot === 'attack2' ? 'Attack 2' : slot === 'defence1' ? 'Defence 1' : 'Defence 2';
+        return '<div class="instruction-slot">' +
+          '<div class="instruction-slot-title">' + label + '</div>' +
+          '<select id="m-' + slot + '-instruction" class="form-input form-input-sm" onchange="saveLastInstructions()">' +
+            options.map(function(o) { return '<option value="' + o + '">' + o + '</option>'; }).join('') +
+          '</select>' +
+          '<select id="m-' + slot + '-target" class="form-input form-input-sm" onchange="saveLastInstructions()">' +
+            '<option value="">Targeted Player</option>' +
+            (function() {
+              var usedInPids = _matchSubs.map(function(s) { return s.in_player_id; });
+              var onPitch = _matchTitulaires.map(function(t) {
+                var sub = _matchSubs.find(function(s) { return s.out_player_id === t.player_id; });
+                return sub ? sub.in_player_id : t.player_id;
+              });
+              usedInPids.forEach(function(pid) { if (!onPitch.includes(pid)) onPitch.push(pid); });
+              return onPitch.map(function(pid) {
+                var p = State.players.find(function(x) { return x.id === pid; });
+                return p ? '<option value="' + p.id + '">' + p.name + '</option>' : '';
+              }).join('');
+            })() +
+          '</select>' +
+        '</div>';
+      }).join('') +
+    '</div>' +
+  '</details>';
+
+  rightCol += '</div>'; // fin match-info-top
+
+  // Séparateur horizontal redimensionnable
+  rightCol += '<div class="match-hdivider" id="match-hdivider" onmousedown="matchHDividerStart(event)"></div>';
+
+  // Zone basse fixe — fiche joueur toujours visible
+  rightCol += '<div class="match-player-panel-fixed">' +
+    '<div class="match-player-panel-title" id="match-player-panel-label">' +
+      '<i class="ti ti-user"></i> <span>Clique un joueur sur le terrain</span>' +
+    '</div>' +
+    '<div id="pitch-stats-col" class="pitch-player-panel">' + renderPitchStatsPanel() + '</div>' +
+  '</div>';
+
+  rightCol += '</div>';
+
+  return '<div class="match-main-layout">' + leftCol + '<div class="match-divider" id="match-divider" onmousedown="matchDividerStart(event)"></div>' + rightCol + '</div>';
+}
+
+function onFormationInput(val) {
+  _matchLastFormation = val.trim();
+  var pitchCol = document.querySelector('.match-pitch-col');
+  var slots = _matchLastFormation ? buildPitchSlots(_matchLastFormation) : null;
+  var hasPitch = !!(slots && slots.length === 11);
+  if (pitchCol && hasPitch) {
+    pitchCol.innerHTML =
+      '<div class="pitch-formation-label">' + _matchLastFormation + '</div>' +
+      renderPitchSVG(slots, _matchLastFormation) +
+      '<div class="pitch-legend">' +
+        '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="border-color:#60a5fa"></span>Titulaire</span>' +
+        '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="border-color:#34d399"></span>Remplacé</span>' +
+        '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="background:#2d1f4e;border-color:#a78bfa"></span>Stats</span>' +
+      '</div>';
+  } else if (pitchCol && !hasPitch) {
+    var el = document.getElementById('match-tab-content');
+    if (el) el.innerHTML = renderMatchTabMain();
+  }
+}
+
+function onFormationQuickInput(val) {
+  _matchLastFormation = val.trim();
+  var slots = _matchLastFormation ? buildPitchSlots(_matchLastFormation) : null;
+  if (slots && slots.length === 11) {
+    var el = document.getElementById('match-tab-content');
+    if (el) el.innerHTML = renderMatchTabMain();
+  }
+}
+
+// ── Terrain SVG interactif ────────────────────────────────────────────────────
+function renderPitchSVG(slots, formation) {
+  var q = String.fromCharCode(39);
+  var W = 180; var H = 290;
+
+  var svgNodes = slots.map(function(slot, i) {
+    var titu = _matchTitulaires[i];
+    var cx = Math.round(slot.left / 100 * W);
+    var cy = Math.round(slot.top / 100 * H);
+
+    // Slot vide — pas encore de joueur assigné
+    if (!titu) {
+      return '<g>' +
+        '<circle cx="' + cx + '" cy="' + cy + '" r="14" fill="rgba(255,255,255,0.04)" stroke="rgba(255,255,255,0.15)" stroke-width="1" stroke-dasharray="3,2"/>' +
+        '<text x="' + cx + '" y="' + (cy+4) + '" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.3)">' + slot.label + '</text>' +
+      '</g>';
+    }
+
+    var sub = _matchSubs.find(function(s) { return s.out_player_id === titu.player_id; });
+    var activePid = sub ? sub.in_player_id : titu.player_id;
+    var player = State.players.find(function(p) { return p.id === activePid; });
+    var origPlayer = sub ? State.players.find(function(p) { return p.id === titu.player_id; }) : null;
+    var name = player ? player.name.split(' ').pop() : '?';
+    var origName = origPlayer ? origPlayer.name.split(' ').pop() : '';
+    var st = _matchPlayerStats[activePid] || {};
+    var hasStats = st.goals > 0 || st.assists > 0 || st.saves > 0 || st.yellow_card || st.red_card || st.rating > 0;
+    var isSelected = _pitchSelectedPid === activePid || _pitchSelectedPid === titu.player_id;
+    var r = 14;
+
+    // Couleurs
+    var fill = sub ? '#0d2818' : (isSelected ? '#2a1f00' : '#1e3a5f');
+    var stroke = sub ? '#34d399' : (isSelected ? '#f59e0b' : (hasStats ? '#a78bfa' : '#60a5fa'));
+    var strokeW = isSelected ? 2.5 : 1.5;
+
+    var nodeHtml = '<g onclick="onPitchPlayerClick(' + q + titu.player_id + q + ',' + q + activePid + q + ')" style="cursor:pointer">';
+    nodeHtml += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>';
+
+    // Badge stats
+    var statCount = (st.goals || 0) + (st.assists || 0);
+    if (statCount > 0) {
+      nodeHtml += '<circle cx="' + (cx+10) + '" cy="' + (cy-10) + '" r="6" fill="#a78bfa"/>';
+      nodeHtml += '<text x="' + (cx+10) + '" y="' + (cy-7) + '" text-anchor="middle" font-size="7" font-weight="700" fill="#fff">' + statCount + '</text>';
+    }
+    if (st.yellow_card) {
+      nodeHtml += '<rect x="' + (cx-4) + '" y="' + (cy-r-6) + '" width="8" height="5" rx="1" fill="#f59e0b"/>';
+    }
+    if (st.red_card) {
+      nodeHtml += '<rect x="' + (cx+1) + '" y="' + (cy-r-6) + '" width="8" height="5" rx="1" fill="#f87171"/>';
+    }
+
+    // Label position
+    nodeHtml += '<text x="' + cx + '" y="' + (cy+4) + '" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">' + slot.label + '</text>';
+
+    // Nom joueur (sous le cercle)
+    nodeHtml += '<text x="' + cx + '" y="' + (cy+r+9) + '" text-anchor="middle" font-size="7.5" fill="' + (sub ? '#34d399' : '#e2e8f0') + '" font-weight="600">' + name + '</text>';
+
+    // Nom titulaire barré si remplacé
+    if (sub && origName) {
+      nodeHtml += '<text x="' + cx + '" y="' + (cy+r+18) + '" text-anchor="middle" font-size="6.5" fill="#6b7280" text-decoration="line-through">' + origName + '</text>';
+    }
+
+    // Joueur sélectionné pour remplacement — halo orange
+    if (_pitchSubMode && _pitchSubOutPid === titu.player_id) {
+      nodeHtml += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r+3) + '" fill="none" stroke="#f59e0b" stroke-width="2" stroke-dasharray="4,2"/>';
+    }
+
+    nodeHtml += '</g>';
+    return nodeHtml;
+  }).join('');
+
+  var svgHtml = '<svg viewBox="0 0 ' + W + ' ' + H + '" width="100%" style="display:block;border-radius:8px;overflow:visible;max-height:calc(90vh - 220px)">' +
+    '<rect x="0" y="0" width="' + W + '" height="' + H + '" rx="6" fill="#1a3a1a"/>' +
+    '<rect x="10" y="10" width="' + (W-20) + '" height="' + (H-20) + '" rx="4" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
+    '<line x1="10" y1="' + (H/2) + '" x2="' + (W-10) + '" y2="' + (H/2) + '" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
+    '<circle cx="' + (W/2) + '" cy="' + (H/2) + '" r="22" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
+    '<rect x="' + (W/2-25) + '" y="10" width="50" height="30" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
+    '<rect x="' + (W/2-25) + '" y="' + (H-40) + '" width="50" height="30" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>' +
+    svgNodes +
+  '</svg>';
+
+  // Liste remplaçants toujours visible sous le terrain
+  var usedInPids = _matchSubs.map(function(s) { return s.in_player_id; });
+  var benchPlayers = _matchRemplacants.filter(function(r) { return !usedInPids.includes(r.player_id); });
+  var alreadyIn = _matchRemplacants.filter(function(r) { return usedInPids.includes(r.player_id); });
+
+  var benchHtml = '<div class="pitch-bench">';
+  benchHtml += '<div class="pitch-bench-title">' + (_pitchSubMode && _pitchSubOutPid ? '<span style="color:var(--amber)">⇄ Choisir le remplaçant</span>' : 'Banc (' + benchPlayers.length + ')') + '</div>';
+  benchHtml += '<div class="pitch-bench-list">';
+
+  benchPlayers.forEach(function(sel) {
+    var p = State.players.find(function(x) { return x.id === sel.player_id; });
+    var cards = State.cards[sel.player_id] || [];
+    var card = cards.find(function(c) { return c.id === sel.card_id; }) || cards[0];
+    var pos = card && card.efhub_stats ? (card.efhub_stats.position || '') : '';
+    var isTarget = _pitchSubMode && _pitchSubOutPid;
+    benchHtml += '<div class="pitch-bench-player' + (isTarget ? ' sub-target' : '') + '" onclick="onPitchSubSelect(' + q + sel.player_id + q + ')">' +
+      '<span class="pitch-bench-pos">' + pos + '</span>' +
+      '<span class="pitch-bench-name">' + (p ? p.name : '?') + '</span>' +
+      (isTarget ? '<span class="pitch-bench-in">↑</span>' : '') +
+    '</div>';
+  });
+
+  if (alreadyIn.length > 0) {
+    benchHtml += '<div class="pitch-bench-subtitle">Déjà entrés</div>';
+    alreadyIn.forEach(function(sel) {
+      var p = State.players.find(function(x) { return x.id === sel.player_id; });
+      var sub = _matchSubs.find(function(s) { return s.in_player_id === sel.player_id; });
+      benchHtml += '<div class="pitch-bench-player played">' +
+        '<span class="pitch-bench-name" style="color:var(--muted)">' + (p ? p.name : '?') + '</span>' +
+        '<span class="pitch-bench-min">' + (sub ? sub.minute + String.fromCharCode(39) : '') + '</span>' +
+      '</div>';
+    });
+  }
+
+  benchHtml += '</div></div>';
+  return svgHtml + benchHtml;
+}
+
+// ── Clic sur un joueur du terrain ─────────────────────────────────────────────
+function onPitchPlayerClick(origPid, activePid) {
+  if (_pitchSubMode) {
+    if (_pitchSubOutPid !== origPid) {
+      _pitchSubOutPid = origPid;
+    }
+    return;
+  }
+  _pitchSelectedPid = (_pitchSelectedPid === activePid || _pitchSelectedPid === origPid) ? null : activePid;
+
+  // Mettre à jour le panneau stats directement
+  var statsCol = document.getElementById('pitch-stats-col');
+  if (statsCol) {
+    statsCol.innerHTML = renderPitchStatsPanel();
+  }
+
+  // Mettre à jour le titre du panel
+  var label = document.getElementById('match-player-panel-label');
+  if (label && _pitchSelectedPid) {
+    var p = State.players.find(function(x) { return x.id === _pitchSelectedPid; });
+    label.innerHTML = '<i class="ti ti-user"></i> <span>' + (p ? p.name : '—') + '</span>';
+  } else if (label) {
+    label.innerHTML = '<i class="ti ti-user"></i> <span>Clique un joueur sur le terrain</span>';
+  }
+
+  // Scroll vers le panel pour s'assurer qu'il est visible
+  var panel = document.querySelector('.match-player-panel-fixed');
+  if (panel && _pitchSelectedPid) {
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // Re-render le terrain pour mettre à jour la surbrillance
+  var formationVal = _matchLastFormation || '';
+  var fEl = document.getElementById('m-formation');
+  if (fEl && fEl.value) formationVal = fEl.value;
+  var slots = formationVal ? buildPitchSlots(formationVal) : null;
+  if (slots) {
+    var pitchCol = document.querySelector('.match-pitch-col');
+    if (pitchCol) {
+      pitchCol.innerHTML =
+        '<div class="pitch-formation-label">' + formationVal + '</div>' +
+        renderPitchSVG(slots, formationVal) +
+        '<div class="pitch-legend">' +
+          '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="border-color:#60a5fa"></span>Titulaire</span>' +
+          '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="border-color:#34d399"></span>Remplacé</span>' +
+          '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="background:#2d1f4e;border-color:#a78bfa"></span>Stats</span>' +
+        '</div>';
+    }
+  }
+}
+
+// ── Sélection d'un remplaçant entrant ─────────────────────────────────────────
+function onPitchSubSelect(inPid) {
+  if (!_pitchSubOutPid) return;
+  // Demander la minute via un petit prompt inline
+  var min = parseInt(prompt('Minute de substitution :', '60') || '60');
+  if (isNaN(min) || min < 1) return;
+  _matchSubs.push({ out_player_id: _pitchSubOutPid, in_player_id: inPid, minute: min });
+  // Ajouter le remplaçant aux stats
+  if (!_matchPlayerStats[inPid]) {
+    _matchPlayerStats[inPid] = { goals:0, assists:0, saves:0, yellow_card:false, red_card:false, rating:0 };
+  }
+  _pitchSubMode = false;
+  _pitchSubOutPid = null;
+  _pitchSelectedPid = inPid;
+  refreshPitchStats();
+}
+
+// ── Activer le mode remplacement depuis la fiche ──────────────────────────────
+function updateSubMinute(outPid, newMinute) {
+  var min = parseInt(newMinute);
+  if (isNaN(min) || min < 1) return;
+  var sub = _matchSubs.find(function(s) { return s.out_player_id === outPid; });
+  if (sub) {
+    sub.minute = min;
+    // Mettre à jour le badge dans la fiche remplaçant sans re-render complet
+    var badge = document.querySelector('.ppc-sub-badge');
+    if (badge) badge.textContent = '⇄ ' + min + String.fromCharCode(39);
+  }
+}
+
+function cancelSub(outPid) {
+  var subIdx = _matchSubs.findIndex(function(s) { return s.out_player_id === outPid; });
+  if (subIdx < 0) return;
+  var sub = _matchSubs[subIdx];
+  // Supprimer les stats du remplaçant entrant
+  delete _matchPlayerStats[sub.in_player_id];
+  // Supprimer la substitution
+  _matchSubs.splice(subIdx, 1);
+  _pitchSelectedPid = outPid;
+  refreshPitchStats();
+}
+
+function startPitchSubMode(origPid) {
+  _pitchSubMode = true;
+  _pitchSubOutPid = origPid;
+  _pitchSelectedPid = null;
+  refreshPitchStats();
+}
+
+function cancelPitchSubMode() {
+  _pitchSubMode = false;
+  _pitchSubOutPid = null;
+  refreshPitchStats();
+}
+
+// ── Refresh terrain + panneau droite ─────────────────────────────────────────
+function refreshPitchStats() {
+  var formationVal = _matchLastFormation || '';
+  var fEl = document.getElementById('m-formation');
+  if (fEl && fEl.value) formationVal = fEl.value;
+  var slots = formationVal ? buildPitchSlots(formationVal) : null;
+  if (!slots) return;
+
+  // Re-render SVG dans la colonne terrain
+  var pitchCol = document.querySelector('.match-pitch-col');
+  if (pitchCol) {
+    pitchCol.innerHTML =
+      '<div class="pitch-formation-label">' + formationVal + '</div>' +
+      renderPitchSVG(slots, formationVal) +
+      '<div class="pitch-legend">' +
+        '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="border-color:#60a5fa"></span>Titulaire</span>' +
+        '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="border-color:#34d399"></span>Remplacé</span>' +
+        '<span class="pitch-legend-item"><span class="pitch-legend-dot" style="background:#2d1f4e;border-color:#a78bfa"></span>Stats</span>' +
+      '</div>';
+  }
+
+  // Re-render panneau stats droite
+  var statsCol = document.getElementById('pitch-stats-col');
+  if (statsCol) {
+    statsCol.innerHTML = renderPitchStatsPanel();
+  }
+}
+
+// ── Panneau stats à droite du terrain ────────────────────────────────────────
+function renderPitchStatsPanel() {
+  var q = String.fromCharCode(39);
+
+  if (_pitchSubMode) {
+    return '<div style="padding:12px;color:var(--amber);font-size:12px;display:flex;align-items:center;gap:8px">' +
+      '<i class="ti ti-replace"></i>' +
+      '<span>Clique sur un remplaçant (vert) en bas du terrain</span>' +
+      '</div>' +
+      '<button class="btn-sm btn-ghost" style="margin:0 12px;width:calc(100% - 24px)" onclick="cancelPitchSubMode()">Annuler</button>';
+  }
+
+  if (!_pitchSelectedPid) {
+    return '<div class="pitch-stats-hint">' +
+      '<i class="ti ti-click" style="font-size:24px;color:var(--muted)"></i>' +
+      '<p>Clique sur un joueur<br>sur le terrain</p>' +
+    '</div>';
+  }
+
+  // Chercher le slot du joueur sélectionné (titulaire original ou remplaçant entrant)
+  var tituEntry = _matchTitulaires.find(function(t) {
+    if (t.player_id === _pitchSelectedPid) return true;
+    var sub = _matchSubs.find(function(s) { return s.out_player_id === t.player_id; });
+    return sub && sub.in_player_id === _pitchSelectedPid;
+  });
+
+  // Si pas trouvé dans titulaires, chercher dans remplaçants (entré en jeu)
+  if (!tituEntry) {
+    var subEntry = _matchSubs.find(function(s) { return s.in_player_id === _pitchSelectedPid; });
+    if (subEntry) {
+      tituEntry = _matchTitulaires.find(function(t) { return t.player_id === subEntry.out_player_id; });
+    }
+  }
+
+  // Toujours afficher au moins la fiche du joueur cliqué
+  var cards = [];
+  var subEntry = null;
+  if (tituEntry) {
+    subEntry = _matchSubs.find(function(s) { return s.out_player_id === tituEntry.player_id; });
+    cards.push({ pid: tituEntry.player_id, isSub: false, minute: null });
+    if (subEntry) cards.push({ pid: subEntry.in_player_id, isSub: true, minute: subEntry.minute });
+  } else {
+    cards.push({ pid: _pitchSelectedPid, isSub: false, minute: null });
+  }
+
+  var html = '';
+  cards.forEach(function(item, i) {
+    html += renderPitchPlayerCard(item.pid, item.isSub, item.minute);
+    // Insérer le séparateur minute entre titulaire sorti et remplaçant entrant
+    if (i === 0 && subEntry) {
+      var q2 = String.fromCharCode(39);
+      html += '<div class="sub-minute-editor">' +
+        '<span class="sub-minute-label"><i class="ti ti-replace"></i> Substitution</span>' +
+        '<div class="sub-minute-input-wrap">' +
+          '<input type="number" class="sub-minute-input" id="sub-min-input" min="1" max="120" value="' + (subEntry.minute || '') + '" ' +
+            'onchange="updateSubMinute(' + q2 + subEntry.out_player_id + q2 + ', this.value)" ' +
+            'onblur="updateSubMinute(' + q2 + subEntry.out_player_id + q2 + ', this.value)">' +
+          '<span class="sub-minute-unit">\'</span>' +
+        '</div>' +
+      '</div>';
+    }
+  });
+  return html;
+}
+
+function renderPitchPlayerCard(pid, isSub, subMinute) {
+  var q = String.fromCharCode(39);
+  var st = _matchPlayerStats[pid] || { goals:0, assists:0, saves:0, yellow_card:false, red_card:false, rating:0 };
+  var player = State.players.find(function(p) { return p.id === pid; });
+  var cards = State.cards[pid] || [];
+  var card = cards[0];
+  var isGK = card && card.efhub_stats && card.efhub_stats.position === 'GK';
+  var efhubId = player ? Efhub.parseId(player.efhub_url || '') : null;
+  var imgUrl = efhubId ? Efhub.imgUrl(efhubId) : null;
+  // Vérifier si ce joueur peut encore être remplacé
+  var alreadySub = _matchSubs.some(function(s) { return s.out_player_id === pid; });
+  var canReplace = !isSub && !alreadySub && _matchRemplacants.filter(function(r) {
+    return !_matchSubs.some(function(s) { return s.in_player_id === r.player_id; });
+  }).length > 0;
+
+  var html = '<div class="pitch-player-card' + (isSub ? ' is-sub' : '') + '" id="ppc-' + pid + '">';
+
+  // Header
+  html += '<div class="ppc-header">';
+  if (imgUrl) html += '<img src="' + imgUrl + '" class="ppc-img" onerror="this.style.display=' + q + 'none' + q + '">';
+  html += '<div class="ppc-info">';
+  html += '<div class="ppc-name">' + (player ? player.name : pid) + '</div>';
+  var pos = card && card.efhub_stats ? (card.efhub_stats.position || '') : '';
+  html += '<div class="ppc-sub-row">';
+  if (pos) html += '<span class="ppc-pos">' + pos + '</span>';
+  if (isSub) html += '<span class="ppc-sub-badge">⇄ ' + (subMinute || '') + String.fromCharCode(39) + '</span>';
+  html += '</div>';
+  html += '</div>';
+  if (canReplace) {
+    html += '<button class="btn-sm btn-ghost ppc-sub-btn" onclick="startPitchSubMode(' + q + pid + q + ')"><i class="ti ti-replace"></i> Remplacer</button>';
+  }
+  if (alreadySub) {
+    html += '<button class="btn-sm btn-ghost ppc-sub-btn" style="color:var(--red)" onclick="cancelSub(' + q + pid + q + ')"><i class="ti ti-x"></i> Annuler</button>';
+  }
+  html += '</div>';
+
+  // Stats
+  html += '<div class="ppc-stats">';
+  html += '<div class="ppc-stat-chip"><span>⚽</span><button class="btn-click" onclick="updateMatchStat(' + q + pid + q + ',' + q + 'goals' + q + ',-1)">−</button><span id="mps-goals-' + pid + '">' + st.goals + '</span><button class="btn-click" onclick="updateMatchStat(' + q + pid + q + ',' + q + 'goals' + q + ',1)">+</button></div>';
+  html += '<div class="ppc-stat-chip"><span><i class="ti ti-shoe"></i></span><button class="btn-click" onclick="updateMatchStat(' + q + pid + q + ',' + q + 'assists' + q + ',-1)">−</button><span id="mps-assists-' + pid + '">' + st.assists + '</span><button class="btn-click" onclick="updateMatchStat(' + q + pid + q + ',' + q + 'assists' + q + ',1)">+</button></div>';
+  if (isGK) html += '<div class="ppc-stat-chip"><span>🧤</span><button class="btn-click" onclick="updateMatchStat(' + q + pid + q + ',' + q + 'saves' + q + ',-1)">−</button><span id="mps-saves-' + pid + '">' + st.saves + '</span><button class="btn-click" onclick="updateMatchStat(' + q + pid + q + ',' + q + 'saves' + q + ',1)">+</button></div>';
+  html += '<button class="card-btn-small ' + (st.yellow_card ? 'active-yellow' : '') + '" onclick="pitchToggleCard(' + q + pid + q + ',' + q + 'yellow' + q + ')">🟡</button>';
+  html += '<button class="card-btn-small ' + (st.red_card ? 'active-red' : '') + '" onclick="pitchToggleCard(' + q + pid + q + ',' + q + 'red' + q + ')">🔴</button>';
+  html += '</div>';
+
+  // Note
+  html += '<div class="ppc-rating-row">';
+  [1,1.5,2,2.5,3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,9.5,10].forEach(function(n) {
+    html += '<button class="rating-mini-btn ' + (st.rating === n ? 'active' : '') + '" onclick="pitchSetRating(' + q + pid + q + ',' + n + ')">' + n + '</button>';
+  });
+  html += '</div>';
+  html += '</div>';
+  return html;
+}
+
+// ── Actions stats depuis le terrain ──────────────────────────────────────────
+function pitchToggleCard(pid, type) {
+  if (!_matchPlayerStats[pid]) _matchPlayerStats[pid] = { goals:0, assists:0, saves:0, yellow_card:false, red_card:false, rating:0 };
+  _matchPlayerStats[pid][type + '_card'] = !_matchPlayerStats[pid][type + '_card'];
+  refreshPitchStats();
+}
+
+function pitchSetRating(pid, val) {
+  if (!_matchPlayerStats[pid]) _matchPlayerStats[pid] = { goals:0, assists:0, saves:0, yellow_card:false, red_card:false, rating:0 };
+  _matchPlayerStats[pid].rating = _matchPlayerStats[pid].rating === val ? 0 : val;
+  refreshPitchStats();
+}
+
+var _matchHDivDragging = false;
+var _matchHDivStartY = 0;
+var _matchHDivStartH = 0;
+
+function matchHDividerStart(e) {
+  e.preventDefault();
+  var top = document.querySelector('.match-info-top');
+  if (!top) return;
+  _matchHDivDragging = true;
+  _matchHDivStartY = e.clientY;
+  _matchHDivStartH = top.offsetHeight;
+  var divider = document.getElementById('match-hdivider');
+  if (divider) divider.classList.add('dragging');
+  document.addEventListener('mousemove', matchHDividerMove);
+  document.addEventListener('mouseup', matchHDividerEnd);
+}
+
+function matchHDividerMove(e) {
+  if (!_matchHDivDragging) return;
+  var top = document.querySelector('.match-info-top');
+  var infoCol = document.querySelector('.match-info-col');
+  if (!top || !infoCol) return;
+  var delta = e.clientY - _matchHDivStartY;
+  var totalH = infoCol.offsetHeight;
+  var newH = Math.max(30, Math.min(totalH - 30, _matchHDivStartH + delta));
+  top.style.height = newH + 'px';
+  top.style.flex = 'none';
+}
+
+function matchHDividerEnd() {
+  _matchHDivDragging = false;
+  var divider = document.getElementById('match-hdivider');
+  if (divider) divider.classList.remove('dragging');
+  document.removeEventListener('mousemove', matchHDividerMove);
+  document.removeEventListener('mouseup', matchHDividerEnd);
+}
+
+// ── Redimensionnement modal match ─────────────────────────────────────────────
+var _matchDivDragging = false;
+var _matchDivStartX = 0;
+var _matchDivStartW = 0;
+
+function matchDividerStart(e) {
+  e.preventDefault();
+  var pitchCol = document.querySelector('.match-pitch-col');
+  if (!pitchCol) return;
+  _matchDivDragging = true;
+  _matchDivStartX = e.clientX;
+  _matchDivStartW = pitchCol.offsetWidth;
+  var divider = document.getElementById('match-divider');
+  if (divider) divider.classList.add('dragging');
+  document.addEventListener('mousemove', matchDividerMove);
+  document.addEventListener('mouseup', matchDividerEnd);
+}
+
+function matchDividerMove(e) {
+  if (!_matchDivDragging) return;
+  var pitchCol = document.querySelector('.match-pitch-col');
+  if (!pitchCol) return;
+  var delta = e.clientX - _matchDivStartX;
+  var newW = Math.max(80, Math.min(window.innerWidth * 0.7, _matchDivStartW + delta));
+  pitchCol.style.width = newW + 'px';
+  pitchCol.style.flexShrink = '0';
+}
+
+function matchDividerEnd() {
+  _matchDivDragging = false;
+  var divider = document.getElementById('match-divider');
+  if (divider) divider.classList.remove('dragging');
+  document.removeEventListener('mousemove', matchDividerMove);
+  document.removeEventListener('mouseup', matchDividerEnd);
+}
+
+// ── Onglet Résumé ────────────────────────────────────────────────────────────
+function renderMatchTabResume() {
+  var allPlayers = State.players;
+  var q = String.fromCharCode(39);
+
+  // Section builds par joueur
+  var allLineup = _matchTitulaires.concat(_matchRemplacants);
+  var buildsHtml = '<div class="form-section-title" style="margin-bottom:8px">Builds utilisés</div>';
+  buildsHtml += '<div class="resume-builds-list">';
+  allLineup.forEach(function(sel) {
+    if (!sel || !sel.player_id) return;
+    var p = State.players.find(function(x) { return x.id === sel.player_id; });
+    var buildId = sel.build_id;
+    var build = buildId ? Object.values(State.builds).flat().find(function(b) { return b.id === buildId; }) : null;
+    var cards = State.cards[sel.player_id] || [];
+    var card = cards.find(function(c) { return c.id === sel.card_id; }) || cards[0];
+    var pos = card && card.efhub_stats ? (card.efhub_stats.position || '') : '';
+    buildsHtml += '<div class="resume-build-row">' +
+      '<span class="resume-build-pos">' + pos + '</span>' +
+      '<span class="resume-build-name">' + (p ? p.name : '?') + '</span>' +
+      '<span class="resume-build-val ' + (build ? '' : 'no-build') + '">' + (build ? build.name : '— Sans build —') + '</span>' +
+    '</div>';
+  });
+  buildsHtml += '</div>';
+
+  return buildsHtml +
+  '<div class="form-row" style="margin-top:12px">' +
+    '<div class="form-group"><label>🏅 Homme du match</label><select id="m-man-of-match" class="form-input">' +
+      '<option value="">— Aucun —</option>' +
+      allPlayers.map(function(p) { return '<option value="' + p.id + '">' + p.name + '</option>'; }).join('') +
+    '</select></div>' +
+    '<div class="form-group"><label>Note globale (1-5)</label><select id="m-note" class="form-input">' +
+      '<option value="3">3 — Moyen</option>' +
+      '<option value="1">1 — Très mauvais</option>' +
+      '<option value="2">2 — Mauvais</option>' +
+      '<option value="4">4 — Bon</option>' +
+      '<option value="5">5 — Excellent</option>' +
+    '</select></div>' +
+  '</div>' +
+  '<div class="form-group">' +
+    '<label class="checkbox-label"><input type="checkbox" id="m-repeated-opponent"> Adversaire répétitif</label>' +
+  '</div>';
 }
 
 // ── Gestion titulaires/remplaçants dans le modal match ────────────────────────
@@ -1755,7 +4152,7 @@ function renderMatchPlayerStatsList() {
         <div class="match-player-rating">
           <span style="font-size:10px;color:var(--muted)">Note eFootball /10</span>
           <div class="rating-mini-btns">
-            ${[3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,9.5,10].map(n => `
+            ${[1,1.5,2,2.5,3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,9.5,10].map(n => `
               <button class="rating-mini-btn ${stats.rating === n ? 'active' : ''}"
                       onclick="setMatchPlayerRating('${pid}',${n})">${n}</button>
             `).join('')}
@@ -2073,15 +4470,23 @@ function applyLastInstructions() {
     var saved = localStorage.getItem(INSTRUCTIONS_STORAGE_KEY);
     if (!saved) return;
     var d = JSON.parse(saved);
+    // Joueurs actuellement sur le terrain
+    var usedInPids = _matchSubs.map(function(s) { return s.in_player_id; });
+    var onPitch = _matchTitulaires.map(function(t) {
+      var sub = _matchSubs.find(function(s) { return s.out_player_id === t.player_id; });
+      return sub ? sub.in_player_id : t.player_id;
+    });
+    usedInPids.forEach(function(pid) { if (!onPitch.includes(pid)) onPitch.push(pid); });
+
     var fields = [
-      ['m-attack1-instruction', d.a1], ['m-attack1-target', d.a1t],
-      ['m-attack2-instruction', d.a2], ['m-attack2-target', d.a2t],
-      ['m-defence1-instruction', d.d1], ['m-defence1-target', d.d1t],
-      ['m-defence2-instruction', d.d2], ['m-defence2-target', d.d2t],
+      ['m-attack1-instruction', d.a1], ['m-attack1-target', onPitch.includes(d.a1t) ? d.a1t : ''],
+      ['m-attack2-instruction', d.a2], ['m-attack2-target', onPitch.includes(d.a2t) ? d.a2t : ''],
+      ['m-defence1-instruction', d.d1], ['m-defence1-target', onPitch.includes(d.d1t) ? d.d1t : ''],
+      ['m-defence2-instruction', d.d2], ['m-defence2-target', onPitch.includes(d.d2t) ? d.d2t : ''],
     ];
     fields.forEach(function(f) {
       var el = document.getElementById(f[0]);
-      if (el && f[1]) el.value = f[1];
+      if (el) el.value = f[1] || '';
     });
   } catch(e) {}
 }
@@ -2150,7 +4555,7 @@ function renderSinglePlayerStatRow(pid) {
 
     html += '<div class="match-player-rating"><span style="font-size:10px;color:var(--muted)">Note eFootball /10</span>';
     html += '<div class="rating-mini-btns">';
-    [3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,9.5,10].forEach(function(n) {
+    [1,1.5,2,2.5,3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,9.5,10].forEach(function(n) {
       html += '<button class="rating-mini-btn ' + (stats.rating === n ? 'active' : '') + '" onclick="setMatchPlayerRating(' + q + pid + q + ',' + n + ')">' + n + '</button>';
     });
     html += '</div></div>';
@@ -2240,7 +4645,7 @@ function _renderMatchPlayerStatsListV2_OLD() {
 
       html += '<div class="match-player-rating"><span style="font-size:10px;color:var(--muted)">Note eFootball /10</span>';
       html += '<div class="rating-mini-btns">';
-      [3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,9.5,10].forEach(function(n) {
+      [1,1.5,2,2.5,3,3.5,4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,9.5,10].forEach(function(n) {
         html += '<button class="rating-mini-btn ' + (stats.rating === n ? 'active' : '') + '" onclick="setMatchPlayerRating(' + q + pid + q + ',' + n + ')">' + n + '</button>';
       });
       html += '</div></div>';
@@ -2253,7 +4658,6 @@ function _renderMatchPlayerStatsListV2_OLD() {
 // ══════════════════════════════════════════════════════════════════════════════
 // COMPOSITION MATCH — 23 joueurs avec builds
 // ══════════════════════════════════════════════════════════════════════════════
-var SQUAD_STORAGE_KEY = 'efb_squad_23';
 var _squad23 = []; // [{player_id, card_id, build_id}]
 
 function saveSquad23() {
@@ -2330,6 +4734,25 @@ function renderSquad23Section() {
   }
   html += '</div></div>';
   return html;
+}
+
+function addTrendingToSquad23(cardId) {
+  loadSquad23();
+  var card = Object.values(State.cards).flat().find(function(c) { return c.id === cardId; });
+  if (!card) return;
+  var pid = card.player_id;
+
+  // Vérifier si déjà dans la Squad 23
+  if (_squad23.find(function(s) { return s.player_id === pid; })) return;
+
+  if (_squad23.length >= 23) {
+    alert('La sélection est déjà complète (23 joueurs)');
+    return;
+  }
+
+  _squad23.push({ player_id: pid, card_id: cardId, build_id: null });
+  saveSquad23();
+  render();
 }
 
 function addBuildToSquad23(buildId) {
