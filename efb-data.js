@@ -91,13 +91,35 @@ const Builds = {
   },
 };
 
+// ── COACHES ───────────────────────────────────────────────────────────────────
+const Coaches = {
+  getAll() {
+    return sbFetch('efb_coaches?select=*&order=name.asc');
+  },
+  get(id) {
+    return sbFetch(`efb_coaches?id=eq.${id}&select=*`).then(r => r[0]);
+  },
+  create(data) {
+    return sbFetch('efb_coaches', { method: 'POST', body: JSON.stringify(data) }).then(r => r[0]);
+  },
+  update(id, data) {
+    return sbFetch(`efb_coaches?id=eq.${id}`, { method: 'PATCH', body: JSON.stringify(data) }).then(r => r[0]);
+  },
+  delete(id) {
+    return sbFetch(`efb_coaches?id=eq.${id}`, { method: 'DELETE', prefer: 'return=minimal' });
+  },
+};
+
 // ── MATCHES ───────────────────────────────────────────────────────────────────
 const Matches = {
   getAll() {
-    return sbFetch('efb_matches?select=*,efb_builds(name,efb_cards(efb_players(name)))&order=played_at.desc');
+    return sbFetch('efb_matches?select=*,efb_builds(name,efb_cards(efb_players(name))),efb_coaches(name,style,formation)&order=played_at.desc');
   },
   getByBuild(buildId) {
     return sbFetch(`efb_matches?build_id=eq.${buildId}&select=*&order=played_at.desc`);
+  },
+  getByCoach(coachId) {
+    return sbFetch(`efb_matches?coach_id=eq.${coachId}&select=*&order=played_at.desc`);
   },
   get(id) {
     return sbFetch(`efb_matches?id=eq.${id}&select=*`).then(r => r[0]);
@@ -151,15 +173,12 @@ const Progression = {
   },
 
   // Calculer le points_max depuis le level_cap
-  // Formule observée : points ≈ levelCap * 1.94
-  // Valeurs exactes connues : 22→42, 25→48, 30→58, 33→64
   pointsFromLevelCap(levelCap) {
     const known = { 22: 42, 25: 48, 28: 54, 30: 58, 33: 64, 35: 68, 40: 78 };
     return known[levelCap] || Math.round(levelCap * 1.94);
   },
 
   // Stat finale = stat efhub de base + gain des clics
-  // Gain par clic = +1 sur la stat (approximation eFootball)
   statFinal(baseValue, clics) {
     return baseValue + clics;
   },
@@ -323,6 +342,25 @@ const Analyse = {
     })).sort((a, b) => b.total - a.total);
   },
 
+  // Stats par coach
+  byCoach(matches) {
+    const coaches = {};
+    matches.forEach(m => {
+      const cid = m.coach_id || '__none__';
+      const label = m.efb_coaches ? m.efb_coaches.name : (m.coach_id ? m.coach_id : 'Sans coach');
+      if (!coaches[cid]) coaches[cid] = { matches: [], label, style: m.efb_coaches ? m.efb_coaches.style : null, formation: m.efb_coaches ? m.efb_coaches.formation : null };
+      coaches[cid].matches.push(m);
+    });
+    return Object.entries(coaches).map(([cid, data]) => ({
+      coach_id: cid === '__none__' ? null : cid,
+      name: data.label,
+      style: data.style,
+      formation: data.formation,
+      ...this.globalStats(data.matches),
+      serie: this.series(data.matches),
+    })).sort((a, b) => b.winRate - a.winRate);
+  },
+
   // Meilleur XI — joueurs avec le meilleur taux de victoire (min 3 matchs)
   bestXI(matches) {
     const byPlayer = this.byPlayer(matches);
@@ -343,8 +381,8 @@ const Analyse = {
         winRate: Math.round(d.wins / d.total * 100),
         matchCount: d.total,
         wins: d.wins,
-        goals:   (byPlayer.find(p => p.player_id === pid) || {}).goals   || 0,
-        assists: (byPlayer.find(p => p.player_id === pid) || {}).assists || 0,
+        goals:     (byPlayer.find(p => p.player_id === pid) || {}).goals     || 0,
+        assists:   (byPlayer.find(p => p.player_id === pid) || {}).assists   || 0,
         avgRating: (byPlayer.find(p => p.player_id === pid) || {}).avgRating || 0,
       }))
       .sort((a, b) => b.winRate - a.winRate)
@@ -458,3 +496,15 @@ Progression.allStatsFinal = function(efhubStats, sliders) {
 const EFB_ATTACK_INSTRUCTIONS = ['Off', 'Defensive', 'Attacking', 'Anchoring'];
 const EFB_DEFENCE_INSTRUCTIONS = ['Off', 'Tight Marking', 'Man Marking', 'Counter Target', 'Deep Line'];
 const EFB_RANKS = ['Professionnel', 'Superstar', 'Légende'];
+
+// Styles de jeu coach connus en eFootball
+const EFB_COACH_STYLES = [
+  'Possession Game',
+  'Quick Counter',
+  'Long Ball Counter',
+  'Out Wide',
+  'Long Ball',
+  'Tiki-Taka',
+  'High Pressure',
+  'Park the Bus',
+];
