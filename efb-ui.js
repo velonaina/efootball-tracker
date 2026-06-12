@@ -3407,7 +3407,7 @@ function renderMatchTabMain() {
         '<option value="amical">🤝 Amical</option>' +
         '<option value="my_league">⚽ My League</option>' +
       '</select></div>' +
-      '<div class="form-group" style="flex:1"><label>Rang</label><select id="m-match-rank" class="form-input form-input-sm">' +
+      '<div class="form-group" style="flex:1"><label>Rang</label><select id="m-match-rank" class="form-input form-input-sm" onchange="onRankChange(this.value)">' +
         EFB_RANKS.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('') +
       '</select></div>' +
     '</div>' +
@@ -4607,6 +4607,22 @@ function autoUpdateResult() {
   var sa = parseInt(document.getElementById('m-score-against')?.value) || 0;
   var result = sf > sa ? 'V' : sf < sa ? 'D' : 'N';
   selectResult(result);
+}
+
+var RANK_TYPES = ['ligue_ia_d1','ligue_ia_d2','ligue_ia_d3','event_ia','my_league'];
+
+function onMatchTypeChange(type) {
+  autoUpdateResult();
+  var rankSel = document.getElementById('m-match-rank');
+  if (!rankSel) return;
+  var showRank = RANK_TYPES.includes(type);
+  var rankGroup = rankSel.closest('.form-group');
+  if (rankGroup) rankGroup.style.display = showRank ? '' : 'none';
+  if (!showRank) rankSel.value = '';
+}
+
+function onRankChange(val) {
+  // Réservé pour extension future
 }
 
 // ── CRUD actions ──────────────────────────────────────────────────────────────
