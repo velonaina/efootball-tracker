@@ -2269,6 +2269,7 @@ function renderMatchsGlobal() {
 
   return `<div class="matchs-page">
     <style>
+      .matchs-page{display:flex;flex-direction:column;gap:10px;padding:12px 14px;height:calc(100vh - 96px);overflow-y:auto}
       .matchs-search-bar{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:6px 10px;margin-bottom:8px}
       .matchs-search-input{flex:1;background:none;border:none;outline:none;color:var(--text);font-size:13px}
       .matchs-filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;align-items:center}
@@ -5329,6 +5330,26 @@ function renderCoachs() {
   var coaches = State.coaches;
 
   var html = '<div class="coachs-page">';
+  html += '<style>';
+  html += '.coachs-page{padding:10px 14px;height:calc(100vh - 60px);overflow-y:auto}';
+  html += '.coachs-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}';
+  html += '.coachs-title{font-size:15px;font-weight:700}';
+  html += '.coachs-list{display:flex;flex-direction:column;gap:10px}';
+  html += '.coach-card{background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:10px 12px}';
+  html += '.coach-card.coach-active{border-color:var(--accent)}';
+  html += '.coach-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px}';
+  html += '.coach-card-left{flex:1;min-width:0}';
+  html += '.coach-name{font-size:14px;font-weight:700;margin-bottom:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}';
+  html += '.badge-active{font-size:10px;padding:1px 7px;border-radius:20px;background:var(--accent);color:#fff}';
+  html += '.coach-meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px}';
+  html += '.coach-meta-item{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:3px}';
+  html += '.coach-notes{font-size:11px;color:var(--muted);line-height:1.4;margin-top:2px;word-break:break-word}';
+  html += '.coach-card-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}';
+  html += '.coach-stats{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}';
+  html += '.coach-stat{font-size:11px;font-weight:600;color:var(--muted)}';
+  html += '.coach-stat.win{color:var(--green)}.coach-stat.serie{color:var(--accent-light)}.coach-stat.serie-current{color:var(--green)}';
+  html += '</style>';
+
   html += '<div class="coachs-header">';
   html += '<span class="coachs-title"><i class="ti ti-whistle"></i> Coachs (' + coaches.length + ')</span>';
   html += '<button class="btn-sm btn-primary" onclick="openModal(' + q + 'addCoach' + q + ')"><i class="ti ti-plus"></i> Ajouter</button>';
@@ -5441,7 +5462,7 @@ function renderModalAddCoach() {
 
   return '<div class="modal modal-lg">' +
     '<div class="modal-header"><h3>Ajouter un coach</h3><button class="btn-icon" onclick="closeModal()"><i class="ti ti-x"></i></button></div>' +
-    '<div class="modal-body">' +
+    '<div class="modal-body" style="max-height:65vh;overflow-y:auto">' +
 
     '<div class="form-group" style="background:var(--surface3);border-radius:8px;padding:10px;margin-bottom:12px">' +
       '<label style="color:var(--accent)"><i class="ti ti-database"></i> Import depuis la base</label>' +

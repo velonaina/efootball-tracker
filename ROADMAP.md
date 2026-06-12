@@ -1,6 +1,6 @@
 # eFootball Tracker — Roadmap & Documentation
 
-## État actuel du projet (v2.0)
+## État actuel du projet (v3.0)
 
 ### Stack technique
 - **Frontend** : HTML / CSS / JavaScript vanilla (3 fichiers)
@@ -14,10 +14,11 @@
 | Fichier | Rôle |
 |---|---|
 | `efb-app.html` | App principale PC — HTML + CSS (~700 lignes) |
-| `efb-data.js` | Couche données — Supabase CRUD + logique métier + SLIDERS_CONFIG + EFB_STATS_ORDER + Analyse |
-| `efb-ui.js` | Interface — rendu + interactions (~5100 lignes) |
-| `efb-live.html` | App mobile légère — saisie live pendant le match |
+| `efb-data.js` | Couche données — Supabase CRUD + logique métier + SLIDERS_CONFIG + EFB_STATS_ORDER + Analyse + Coaches + EFB_COACHES_DB |
+| `efb-ui.js` | Interface — rendu + interactions (~5500 lignes) |
+| `efb-live.html` | App mobile légère — saisie live pendant le match (mis à jour v3) |
 | `efb_schema_v2.sql` | Schéma Supabase v2 |
+| `efb_coaches_migration.sql` | Migration SQL — table efb_coaches + coach_id dans efb_matches |
 | `efhub-proxy-worker-v11.js` | Cloudflare Worker — proxy efhub + Anthropic |
 | `supabase/functions/coaching/index.ts` | Supabase Edge Function — coaching IA |
 
@@ -53,125 +54,102 @@
 - Sauvegardé automatiquement en localStorage
 - Alimente directement la Formation et le modal match
 
-### Onglet Formation (nouveau) ✨
+### Onglet Formation ✅
 - **Terrain interactif** avec positions selon la formation
 - **Picker de formation** : 20 formations standard + formations personnalisées
 - **Éditeur de formation custom** : drag & drop des nœuds sur terrain SVG, labels éditables, sauvegarde localStorage
+- **Bug corrigé** : `saveFmEditor()` appelle maintenant `ftSelectFormation()` au lieu de `selectFormation()` — la formation custom s'applique correctement après sauvegarde
 - **Interdiction de nommer** une formation custom comme une formation standard
 - **Swap de joueurs** : clic → clic pour échanger deux positions
-- **Détection automatique de rôle** au drag (termes efhub : GK, CB, LB, RB, DMF, CMF, AMF, LMF, RMF, LWF, RWF, SS, CF)
-- **Séparateurs redimensionnables** : vertical (terrain/droite) + horizontal (assignation/banc)
+- **Détection automatique de rôle** au drag
+- **Séparateurs redimensionnables** : vertical + horizontal
 - Mode Terrain + mode Liste
-- Sauvegarde → synchronisation automatique vers modal match (LINEUP_STORAGE_KEY + FT_STORAGE_KEY)
-- Échange banc/terrain : swap automatique des places
+- Sauvegarde → synchronisation automatique vers modal match
 
-### Modal match redesign (nouveau) ✨
-- **2 onglets** : Match + Résumé
-- **Layout plein écran** (95vw) avec terrain permanent à gauche
-- **Terrain interactif** :
-  - Swap de joueurs : clic → clic pour échanger deux positions
-  - Surbrillance orange + halos pointillés pour les cibles d'échange
-  - Bouton changer de rôle dans la fiche joueur (picker GK/CB/LB/RB/DMF/CMF/AMF/LMF/RMF/LWF/RWF/SS/CF)
-- **Banc toujours visible** sous le terrain (remplaçants disponibles + déjà entrés)
-- **Fiche joueur** toujours visible en bas à droite au clic
-- **Séparateurs redimensionnables** : vertical (terrain/infos) + horizontal (infos/fiche joueur)
-- Composition pré-remplie depuis l'onglet Formation
-- Formation mémorisée entre les matchs
-- **Substitutions** : depuis le banc visible, minute éditable inline, bouton Annuler
-- **Instructions individuelles** :
-  - Auto-sauvegarde dès modification (localStorage)
-  - Targeted Player limité aux joueurs sur le terrain
-- **Notes joueurs** : échelle 1 à 10 par pas de 0.5 (0 = non noté)
-- Onglet Résumé : liste des builds utilisés par joueur avant enregistrement
+### Modal match redesign ✅
+- 2 onglets : Match + Résumé
+- Layout plein écran (95vw) avec terrain permanent à gauche
+- Terrain interactif avec swap, surbrillance, changement de rôle
+- Banc toujours visible, fiche joueur fixe en bas à droite
+- Séparateurs redimensionnables
+- Composition pré-remplie depuis Formation
+- Substitutions avec minute éditable inline
+- Instructions individuelles 4 slots avec auto-sauvegarde
+- Notes joueurs 1-10 par pas de 0.5
+- **Sélecteur coach** ajouté dans les infos compactes du modal match
+- `coach_id` sauvegardé dans `efb_matches` à l'enregistrement
 
 ### Enregistrement des matchs
 - Titulaires (11) + remplaçants (12) depuis Formation/Squad 23
 - Substitutions avec minute modifiable
-- Instructions individuelles 4 slots (Attack 1/2, Defence 1/2 + Targeted Player)
-- Stats individuelles : buts, passes (icône shoe), arrêts GK, cartons jaune/rouge, note 1-10
+- Instructions individuelles 4 slots
+- Stats individuelles : buts, passes, arrêts GK, cartons, note 1-10
 - Homme du match, note globale 1-5, adversaire répétitif
-- `build_id` sauvegardé par joueur dans `player_stats` (depuis Squad 23)
+- `build_id` sauvegardé par joueur dans `player_stats`
+- `coach_id` sauvegardé dans le match
 - Formation, formation adverse, rang, rangs pts, date, heure, type de match
 
-### Recherche globale (nouveau) ✨
-- Barre de recherche dans le header — accessible depuis tous les onglets
+### Recherche globale ✅
+- Barre de recherche dans le header
 - Overlay avec résultats groupés : Joueurs, Builds, Matchs
-- Navigation directe au clic (sélectionne le joueur, le build ou scroll vers le match)
+- Navigation directe au clic
 - Fermeture Escape ou clic extérieur
 
-### Analyse étendue (nouveau) ✨
-- KPIs globaux (matchs, victoires, buts marqués/encaissés, taux de victoire, série)
+### Analyse étendue ✅
+- KPIs globaux (matchs, victoires, buts, taux de victoire, série)
 - Série actuelle + record avec timeline
 - Coaching IA (Claude API via Supabase Edge Function)
-- **Performance par type de match** (Ligue JCJ D1/D2/D3, IA, Évènement, Amical...)
-- **Performance par rang**
-- **Performance par formation** (taux de victoire par formation utilisée)
-- **Performance par build** (taux de victoire + buts + passes + note moyenne par build)
-- **Meilleur XI** : 11 joueurs avec le meilleur taux de victoire (min 3 matchs)
-- **Top joueurs** : buteurs, passeurs, meilleures notes moyennes
+- Performance par type de match
+- Performance par rang
+- Performance par formation
+- Performance par build
+- **Performance par coach** ✨ — taux de victoire, matchs, buts, série record + actuelle par coach
+- Meilleur XI (min 3 matchs)
+- Top joueurs : buteurs, passeurs, meilleures notes
 
-### App live mobile (efb-live.html)
-- 3 écrans : Préparation → Live → Post-match
-- Score en temps réel, stats live, remplacements, notes, homme du match
-- Synchronisation Supabase — `source: 'live'`
-- ⚠️ **À mettre à jour** — désynchronisé avec les nouvelles structures
+### Onglet Coachs ✨ (nouveau)
+- Liste de tous les coachs avec style, formation, notes
+- Stats par coach : matchs joués, taux de victoire, buts, série record + actuelle, barre visuelle
+- Bouton **Activer** — définit le coach actif (localStorage `efb_active_coach`)
+- CRUD complet : ajouter, modifier, supprimer
+- **Base intégrée de 64 coachs** (source : amine250.github.io/efootball-managers, juin 2026) :
+  - Import en un clic depuis dropdown groupé par style
+  - Proficiency scores affichés en preview (PG/QC/LBC/OW/LB) — vert si ≥85
+  - Notes auto-remplies : boosters, link-up play, date de sortie
+  - Coachs déjà ajoutés marqués ✓ et désactivés
+- CSS inline pour layout correct (pas de dépendance à efb-app.html)
+- Scroll fonctionnel sur la page
+
+### Onglet Matchs — filtres avancés ✨ (nouveau)
+- Barre de recherche (adversaire, formation, type)
+- Filtres : résultat (V/N/D), type de match, rang, formation, coach
+- Tri : plus récent / plus ancien
+- Bouton reset (apparaît seulement si filtre actif)
+- Stats rapides sur les matchs filtrés (V/N/D + taux victoire + buts)
+- `renderMatchRow` amélioré : adversaire, type, formation, coach, rang en tags colorés
+- Scroll fonctionnel
+
+### App live mobile (efb-live.html) ✅ mis à jour v3
+- Auto-chargement composition depuis `efb_ft_lineup` (Formation) ou `efb_last_lineup`
+- `build_id` par joueur depuis `efb_squad_23`
+- Formation auto-remplie
+- `player_stats` avec `build_id` par joueur
+- `rank` corrigé (entier, pas string)
+- Bouton "Recharger" composition
+- Notice source (Formation / Dernier match)
+- ⚠️ **Coach actif non encore pré-rempli** depuis `efb_active_coach` — à faire
 
 ### Technique
 - Cloudflare Worker v11 : proxy efhub
 - Supabase Edge Function `coaching` : proxy API Anthropic
 - `ANTHROPIC_API_KEY` stockée dans Supabase Secrets
 - Clé Supabase `anon` dans les fichiers (repo privé)
-- **Tous les builds chargés au démarrage** via `Builds.getAll()`
+- Builds chargés au démarrage via `Builds.getAll()` dans `init()`
+- Coachs chargés au démarrage via `Coaches.getAll()` dans `init()`
 
 ---
 
-## Fonctionnalités en attente ⏳
-
-### Priorité haute
-- **Mettre à jour efb-live.html** — désynchronisé avec les nouvelles structures (Formation, modal match, builds)
-- **Import automatique E1** — importer les données depuis efhub directement
-- **Onglet Matchs** — filtres avancés (rang, résultat, date, formation, type)
-
-### Priorité moyenne
-- **Export PDF/CSV** — exporter les stats pour partage
-- **Notifications de série** — alerte quand tu bats ton record de victoires
-- **Comparaison de builds** — comparer 2 builds côte à côte
-- **Historique des builds** — voir l'évolution d'un build dans le temps
-- **Récapitulatif automatique** dans l'onglet Résumé (buteurs, MOTM généré depuis les stats)
-
-### Priorité basse
-- **Mode sombre/clair** — toggle thème (actuellement dark only)
-- **Multi-équipes** — supporter d'autres équipes que Real Madrid
-- **Partage de builds** — exporter un build pour partager
-- **Statistiques avancées** — xG, possession, pressing...
-
----
-
-## Améliorations recommandées
-
-### Performance
-- Paginer les matchs (actuellement on charge tout)
-- Mettre en cache les données efhub (éviter les appels répétés)
-- Lazy loading des photos de joueurs
-- efb-ui.js dépasse 5000 lignes — envisager un découpage modulaire
-
-### UX
-- Toast notification après sauvegarde (au lieu d'alert)
-- Raccourcis clavier pour les actions fréquentes
-- Swipe pour naviguer entre les onglets sur mobile
-
-### Données
-- Ajouter `opp_style` (style de jeu adverse) dans les matchs
-- Tracker les blessures et suspensions
-
-### Sécurité
-- Activer Row Level Security (RLS) sur Supabase
-- Authentification utilisateur (si usage multi-joueurs)
-- Rotation des clés API
-
----
-
-## Schéma Supabase v2
+## Schéma Supabase v3
 
 ### Tables
 | Table | Description |
@@ -179,7 +157,8 @@
 | `efb_players` | Joueurs — id, name, efhub_url, created_at |
 | `efb_cards` | Cartes — player_id, efhub_stats (json), level_cap, points_max, playing_style, card_type, skills (json) |
 | `efb_builds` | Builds — card_id, name, sliders (json), points_used, additional_skills (json) |
-| `efb_matches` | Matchs — tous les champs match + player_stats (json) + titulaires/remplaçants (json) |
+| `efb_coaches` | Coachs — id, name, nationality, style, formation, notes, created_at |
+| `efb_matches` | Matchs — tous les champs + player_stats (json) + titulaires/remplaçants (json) + **coach_id** |
 | `efb_config` | Configuration — match_types, ranks, opp_levels |
 
 ### Format player_stats (dans efb_matches)
@@ -211,6 +190,72 @@
 | `efb_ft_lineup` | Composition Formation — {formation, titulaires, remplacants} |
 | `efb_last_instructions` | Dernières instructions individuelles |
 | `efb_custom_formations` | Formations personnalisées — {name: {slots, custom}} |
+| `efb_active_coach` | ID du coach actif — uuid |
+
+---
+
+## Bugs connus 🐛
+
+| Bug | Fichier | Statut |
+|---|---|---|
+| `efb-live.html` — coach actif non pré-rempli depuis `efb_active_coach` | efb-live.html | À corriger |
+| Modal match — sélecteur coach ne pré-remplit pas le coach actif au chargement | efb-ui.js | À corriger |
+| `renderMatchRow` — anciens matchs ont `played_at` seulement (pas `match_date`) | efb-ui.js | Géré mais à vérifier |
+
+---
+
+## Fonctionnalités en attente ⏳
+
+### Priorité haute — Bugs UX
+- **Toast notifications** — remplacer tous les `alert()` par des toasts discrets (save, delete, erreur)
+- **Modal confirmation suppression** — remplacer `confirm()` natif par un modal propre
+- **efb-live.html** — pré-remplir le coach actif depuis `efb_active_coach` localStorage
+- **Modal match** — pré-remplir le coach actif au chargement depuis `efb_active_coach`
+
+### Priorité haute — Fonctionnalités
+- **Détail match** — cliquer sur un match dans l'onglet Matchs pour voir stats complètes (joueurs, buts, notes, instructions, coach) sans passer par le modal edit
+- **Coaching IA amélioré** — inclure les données coach dans le prompt (style actif, taux de victoire par coach, recommandation)
+
+### Priorité moyenne
+- **Export PDF/CSV** — exporter les stats pour partage
+- **Notifications de série** — alerte quand tu bats ton record de victoires
+- **Comparaison de builds** — comparer 2 builds côte à côte
+- **Historique des builds** — voir l'évolution d'un build dans le temps
+- **Récapitulatif automatique** dans l'onglet Résumé (buteurs, MOTM depuis les stats)
+- **Dashboard coach** — graphique taux de victoire dans le temps par coach
+- **Base coachs** — mise à jour manuelle quand de nouveaux coachs sortent sur amine250.github.io/efootball-managers
+
+### Priorité basse
+- **Mode sombre/clair** — toggle thème (actuellement dark only)
+- **Multi-équipes** — supporter d'autres équipes que Real Madrid
+- **Partage de builds** — exporter un build pour partager
+- **Statistiques avancées** — xG, possession, pressing...
+- **Pagination matchs** — si dépassement de 100 matchs
+
+---
+
+## Améliorations recommandées
+
+### Performance
+- Paginer les matchs (actuellement on charge tout)
+- Mettre en cache les données efhub (éviter les appels répétés)
+- Lazy loading des photos de joueurs
+- `efb-ui.js` dépasse 5500 lignes — envisager un découpage modulaire
+
+### UX
+- Toast notification après sauvegarde (au lieu d'alert)
+- Raccourcis clavier pour les actions fréquentes
+- Swipe pour naviguer entre les onglets sur mobile
+- Indicateur de chargement plus précis sur Matchs et Coachs
+
+### Données
+- Ajouter `opp_style` (style de jeu adverse) dans les matchs
+- Tracker les blessures et suspensions
+
+### Sécurité
+- Activer Row Level Security (RLS) sur Supabase
+- Authentification utilisateur (si usage multi-joueurs)
+- Rotation des clés API
 
 ---
 
@@ -219,6 +264,21 @@
 `4-3-3` · `4-3-3 ATT` · `4-3-3 DEF` · `4-4-2` · `4-4-2 FLAT` · `4-2-3-1` · `4-1-4-1` · `4-3-1-2` · `4-3-2-1` · `4-4-1-1` · `4-5-1` · `3-5-2` · `3-4-3` · `3-4-2-1` · `3-3-3-1` · `5-3-2` · `5-4-1` · `5-2-3` · `5-2-2-1` · `4-6-0`
 
 Positions efhub : `GK` · `CB` · `LB` · `RB` · `DMF` · `CMF` · `AMF` · `LMF` · `RMF` · `LWF` · `RWF` · `SS` · `CF`
+
+---
+
+## Styles de jeu coach (eFootball)
+
+`Possession Game` · `Quick Counter` · `Long Ball Counter` · `Out Wide` · `Long Ball`
+
+Guide contre-style :
+| Style adverse | Ton style recommandé |
+|---|---|
+| Possession Game | Quick Counter |
+| Quick Counter | Long Ball Counter, Long Ball |
+| Long Ball Counter | Possession Game, Out Wide |
+| Out Wide | Quick Counter, Possession Game |
+| Long Ball | Possession Game, Out Wide, Long Ball Counter |
 
 ---
 
@@ -236,8 +296,15 @@ Positions efhub : `GK` · `CB` · `LB` · `RB` · `DMF` · `CMF` · `AMF` · `LM
 - Ne jamais utiliser de backticks imbriqués dans les template strings
 - Utiliser `String.fromCharCode(39)` pour les guillemets simples dans les strings JS générées
 - Après chaque session : push sur GitHub + incrémenter version dans les commentaires
-- efb-data.js contient toute la logique métier
-- efb-ui.js contient tout le rendu et les interactions
+- `efb-data.js` contient toute la logique métier + `EFB_COACHES_DB` (64 coachs)
+- `efb-ui.js` contient tout le rendu et les interactions
 - Ne jamais nommer une formation custom avec le même nom qu'une formation standard
-- `LINEUP_STORAGE_KEY` et `SQUAD_STORAGE_KEY` déclarés en haut de efb-ui.js (avant ftSave)
-- Builds chargés au démarrage via `Builds.getAll()` dans `init()`
+- `LINEUP_STORAGE_KEY`, `SQUAD_STORAGE_KEY`, `COACH_STORAGE_KEY` déclarés en haut de `efb-ui.js`
+- Builds et Coachs chargés au démarrage via `Builds.getAll()` et `Coaches.getAll()` dans `init()`
+- CSS des nouveaux onglets injecté inline dans la fonction de rendu (pas dans efb-app.html)
+- `Analyse.byCoach()` dans `efb-data.js` — regroupe les matchs par `coach_id`, utilise `m.efb_coaches.name` pour le label
+
+### Architecture CSS
+- `efb-app.html` : CSS global — layout, composants partagés
+- `#app { overflow: hidden }` + `.app-body { overflow: hidden }` — chaque onglet gère son propre scroll
+- Onglets avec scroll : `.analyse-page { overflow-y: auto; height: 100% }`, `.matchs-page { overflow-y: auto; height: calc(100vh - 96px) }`, `.coachs-page { overflow-y: auto; height: calc(100vh - 60px) }`, `.ft-layout { overflow: hidden }` (colonnes internes scrollables)
