@@ -1718,7 +1718,7 @@ function renderMatchRow(match) {
   const coach = match.efb_coaches ? match.efb_coaches.name : null;
 
   return `
-    <div class="match-row" id="match-row-${match.id}">
+    <div class="match-row" id="match-row-${match.id}" onclick="openMatchDetail('${match.id}')" style="cursor:pointer">
       <div class="match-result ${resultClass}">${resultLabel}</div>
       <div class="match-info">
         <div class="match-score-line">
@@ -3377,7 +3377,7 @@ function renderMatchTabMain() {
   rightCol += '<div class="match-score-block">' +
     '<div class="match-score-team">' +
       '<div class="match-score-team-name">Real Madrid</div>' +
-      '<input type="number" id="m-score-for" class="match-score-input" min="0" value="0">' +
+      '<input type="number" id="m-score-for" class="match-score-input" min="0" value="0" oninput="autoUpdateResult()">' +
     '</div>' +
     '<div class="match-score-mid">' +
       '<input type="text" id="m-opp-name" class="match-opp-input" placeholder="Adversaire...">' +
@@ -3389,7 +3389,7 @@ function renderMatchTabMain() {
     '</div>' +
     '<div class="match-score-team">' +
       '<div class="match-score-team-name">Adversaire</div>' +
-      '<input type="number" id="m-score-against" class="match-score-input" min="0" value="0">' +
+      '<input type="number" id="m-score-against" class="match-score-input" min="0" value="0" oninput="autoUpdateResult()">' +
     '</div>' +
   '</div>';
 
@@ -3428,7 +3428,8 @@ function renderMatchTabMain() {
       '<div class="form-group" style="flex:2"><label><i class="ti ti-whistle" style="font-size:11px"></i> Coach utilisé</label><select id="m-coach-id" class="form-input form-input-sm">' +
         '<option value="">— Sans coach —</option>' +
         State.coaches.map(function(c) {
-          return '<option value="' + c.id + '">' + c.name + (c.style ? ' · ' + c.style : '') + (c.formation ? ' (' + c.formation + ')' : '') + '</option>';
+          var activeCoachId = getActiveCoachId();
+          return '<option value="' + c.id + '"' + (c.id === activeCoachId ? ' selected' : '') + '>' + c.name + (c.style ? ' · ' + c.style : '') + (c.formation ? ' (' + c.formation + ')' : '') + '</option>';
         }).join('') +
       '</select></div>' +
     '</div>' +
@@ -3942,8 +3943,16 @@ function pitchToggleCard(pid, type) {
 
 function pitchSetRating(pid, val) {
   if (!_matchPlayerStats[pid]) _matchPlayerStats[pid] = { goals:0, assists:0, saves:0, yellow_card:false, red_card:false, rating:0 };
-  _matchPlayerStats[pid].rating = _matchPlayerStats[pid].rating === val ? 0 : val;
-  refreshPitchStats();
+  var newVal = _matchPlayerStats[pid].rating === val ? 0 : val;
+  _matchPlayerStats[pid].rating = newVal;
+  // Mettre à jour les boutons de note directement sans re-render complet
+  var card = document.getElementById('ppc-' + pid);
+  if (card) {
+    card.querySelectorAll('.rating-mini-btn').forEach(function(btn) {
+      var btnVal = parseFloat(btn.textContent);
+      btn.classList.toggle('active', btnVal === newVal);
+    });
+  }
 }
 
 var _matchHDivDragging = false;
@@ -4534,8 +4543,19 @@ function removeMatchPlayerStat(pid) {
 function updateMatchStat(pid, stat, delta) {
   if (!_matchPlayerStats[pid]) return;
   _matchPlayerStats[pid][stat] = Math.max(0, (_matchPlayerStats[pid][stat] || 0) + delta);
-  const el = document.getElementById('mps-' + stat + '-' + pid);
+  // Mettre à jour l'affichage du compteur
+  var el = document.getElementById('mps-' + stat + '-' + pid);
   if (el) el.textContent = _matchPlayerStats[pid][stat];
+  // Si but marqué → incrémenter le score Real Madrid automatiquement
+  if (stat === 'goals') {
+    var scoreEl = document.getElementById('m-score-for');
+    if (scoreEl) {
+      var current = parseInt(scoreEl.value) || 0;
+      var newScore = Math.max(0, current + delta);
+      scoreEl.value = newScore;
+      autoUpdateResult();
+    }
+  }
 }
 
 function toggleMatchCard(pid, type) {
@@ -4580,6 +4600,13 @@ function selectResult(val) {
   document.querySelectorAll('.result-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.val === val);
   });
+}
+
+function autoUpdateResult() {
+  var sf = parseInt(document.getElementById('m-score-for')?.value) || 0;
+  var sa = parseInt(document.getElementById('m-score-against')?.value) || 0;
+  var result = sf > sa ? 'V' : sf < sa ? 'D' : 'N';
+  selectResult(result);
 }
 
 // ── CRUD actions ──────────────────────────────────────────────────────────────
@@ -4671,6 +4698,19 @@ async function saveMatch() {
   const buildId = document.getElementById('m-match-build')?.value;
   const result = document.getElementById('m-match-result')?.value;
   if (!result) { alert('Sélectionne un résultat'); return; }
+  // Vérifier que les 11 titulaires ont tous une note
+  var titulairesPids = _matchTitulaires.map(function(t) { return t.player_id; }).filter(Boolean);
+  var notesManquantes = titulairesPids.filter(function(pid) {
+    return !_matchPlayerStats[pid] || !(_matchPlayerStats[pid].rating > 0);
+  });
+  if (notesManquantes.length > 0) {
+    var names = notesManquantes.map(function(pid) {
+      var p = State.players.find(function(x) { return x.id === pid; });
+      return p ? p.name : pid;
+    });
+    alert('Notes manquantes pour : ' + names.join(', ') + '\n\nTous les titulaires doivent avoir une note avant d\'enregistrer.');
+    return;
+  }
   saveLastInstructions();
 
   // Construire player_stats depuis _matchPlayerStats — avec build_id par joueur
@@ -5230,6 +5270,145 @@ async function updateBuild(buildId) {
   } catch(e) { alert('Erreur : ' + e.message); }
 }
 
+// ── DÉTAIL MATCH (read-only) ──────────────────────────────────────────────────
+function openMatchDetail(matchId) {
+  var match = State.matches.find(function(m) { return m.id === matchId; });
+  if (!match) return;
+  document.getElementById('modal-overlay').classList.remove('hidden');
+  document.getElementById('modal-container').classList.remove('hidden');
+  document.getElementById('modal-container').innerHTML = renderMatchDetail(match);
+}
+
+function renderMatchDetail(match) {
+  var q = String.fromCharCode(39);
+  var resultColor = match.result === 'V' ? 'var(--green)' : match.result === 'N' ? 'var(--amber)' : 'var(--red)';
+  var date = match.match_date
+    ? new Date(match.match_date).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' })
+    : (match.played_at ? new Date(match.played_at).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' }) : '—');
+  var typeLabels = {
+    ligue_jcj_d1:'🏆 Ligue JCJ D1', ligue_jcj_d2:'🏆 Ligue JCJ D2', ligue_jcj_d3:'🏆 Ligue JCJ D3',
+    ligue_ia_d1:'🤖 Ligue IA D1', ligue_ia_d2:'🤖 Ligue IA D2', ligue_ia_d3:'🤖 Ligue IA D3',
+    event_jcj:'🎯 Évènement JCJ', event_ia:'🎯 Évènement IA', amical:'🤝 Amical', my_league:'⚽ My League',
+  };
+  var typeLabel = typeLabels[match.match_type] || match.match_type || '—';
+  var coachName = match.efb_coaches ? match.efb_coaches.name : '—';
+  var playerStats = match.player_stats || [];
+  var tituPids = (match.titulaires || []).map(function(t) { return t.player_id; });
+  var sortedStats = playerStats.slice().sort(function(a, b) {
+    var ai = tituPids.indexOf(a.player_id);
+    var bi = tituPids.indexOf(b.player_id);
+    if (ai === -1) ai = 999;
+    if (bi === -1) bi = 999;
+    return ai - bi;
+  });
+
+  var html = '<div class="modal modal-lg" style="max-width:600px;max-height:88vh">' +
+    '<div class="modal-header" style="background:var(--surface2)">' +
+      '<div style="display:flex;align-items:center;gap:10px;flex:1">' +
+        '<div style="width:36px;height:36px;border-radius:8px;background:' + (match.result === 'V' ? '#0d2818' : match.result === 'N' ? '#1a2000' : '#2a0f0f') + ';display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:' + resultColor + '">' + (match.result || '—') + '</div>' +
+        '<div>' +
+          '<div style="font-size:15px;font-weight:700">Real Madrid ' + (match.score_for || 0) + ' – ' + (match.score_against || 0) + ' ' + (match.opp_name || 'Adversaire') + '</div>' +
+          '<div style="font-size:11px;color:var(--muted)">' + date + (match.match_time ? ' · ' + match.match_time : '') + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;gap:4px">' +
+        '<button class="btn-icon" onclick="closeModal();setTimeout(function(){openModal(' + q + 'editMatch' + q + ',' + q + match.id + q + ')},50)" title="Modifier"><i class="ti ti-pencil"></i></button>' +
+        '<button class="btn-icon" onclick="closeModal()"><i class="ti ti-x"></i></button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="modal-body" style="gap:10px">' +
+
+    '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+      '<span class="match-tag" style="font-size:11px;padding:3px 8px">' + typeLabel + '</span>' +
+      (match.formation ? '<span class="match-tag" style="font-size:11px;padding:3px 8px"><i class="ti ti-layout-soccer-field" style="font-size:10px"></i> ' + match.formation + '</span>' : '') +
+      (match.opp_formation ? '<span class="match-tag" style="font-size:11px;padding:3px 8px">Adv: ' + match.opp_formation + '</span>' : '') +
+      (match.rank ? '<span class="match-tag rank" style="font-size:11px;padding:3px 8px">🏅 ' + match.rank + '</span>' : '') +
+      (coachName !== '—' ? '<span class="match-tag coach" style="font-size:11px;padding:3px 8px"><i class="ti ti-whistle" style="font-size:10px"></i> ' + coachName + '</span>' : '') +
+    '</div>' +
+
+    (match.my_rank || match.opp_rank ? '<div style="font-size:11px;color:var(--muted)">Pts rang : ' + (match.my_rank || '—') + ' (moi) vs ' + (match.opp_rank || '—') + ' (adv)</div>' : '') +
+
+    (match.substitutions && match.substitutions.length > 0 ? (function() {
+      var s = '<div style="background:var(--surface3);border-radius:8px;padding:8px 10px">';
+      s += '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:5px">Substitutions</div>';
+      match.substitutions.forEach(function(sub) {
+        var pOut = State.players.find(function(p) { return p.id === sub.out_player_id; });
+        var pIn = State.players.find(function(p) { return p.id === sub.in_player_id; });
+        s += '<div style="font-size:12px;display:flex;align-items:center;gap:6px;padding:2px 0">' +
+          '<span style="color:var(--muted)">' + (sub.minute || '?') + String.fromCharCode(39) + '</span>' +
+          '<span style="color:var(--red)">↓ ' + (pOut ? pOut.name : '?') + '</span>' +
+          '<span style="color:var(--green)">↑ ' + (pIn ? pIn.name : '?') + '</span>' +
+        '</div>';
+      });
+      s += '</div>';
+      return s;
+    })() : '') +
+
+    (function() {
+      var slots = [
+        { key: 'attack1', label: 'Attack 1' }, { key: 'attack2', label: 'Attack 2' },
+        { key: 'defence1', label: 'Defence 1' }, { key: 'defence2', label: 'Defence 2' },
+      ];
+      var active = slots.filter(function(sl) {
+        var inst = match[sl.key + '_instruction'];
+        return inst && inst !== 'Off';
+      });
+      if (!active.length) return '';
+      var s = '<div style="background:var(--surface3);border-radius:8px;padding:8px 10px">';
+      s += '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:5px">Instructions</div>';
+      s += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">';
+      active.forEach(function(sl) {
+        var inst = match[sl.key + '_instruction'];
+        var targetId = match[sl.key + '_target'];
+        var targetName = targetId ? ((State.players.find(function(p) { return p.id === targetId; }) || {}).name || '') : '';
+        s += '<div style="font-size:11px"><span style="color:var(--muted)">' + sl.label + '</span> ' + inst + (targetName ? ' · <span style="color:var(--accent)">' + targetName + '</span>' : '') + '</div>';
+      });
+      s += '</div></div>';
+      return s;
+    })() +
+
+    (sortedStats.length > 0 ? (function() {
+      var s = '<div>';
+      s += '<div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">Performances joueurs</div>';
+      s += '<div style="display:flex;flex-direction:column;gap:4px">';
+      sortedStats.forEach(function(ps) {
+        var player = State.players.find(function(p) { return p.id === ps.player_id; });
+        var cards = State.cards[ps.player_id] || [];
+        var card = cards[0];
+        var pos = card && card.efhub_stats ? (card.efhub_stats.position || '') : '';
+        var isTitu = tituPids.includes(ps.player_id);
+        var efhubId = player ? Efhub.parseId(player.efhub_url || '') : null;
+        var imgUrl = efhubId ? Efhub.imgUrl(efhubId) : null;
+        var isMOTM = match.man_of_match === ps.player_id;
+        s += '<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--surface3);border-radius:7px;' + (isMOTM ? 'border:0.5px solid var(--amber)' : '') + '">';
+        if (imgUrl) s += '<img src="' + imgUrl + '" style="width:22px;height:28px;border-radius:3px;object-fit:cover;flex-shrink:0" onerror="this.style.display=\'none\'">';
+        s += '<span style="font-size:10px;color:var(--accent);font-weight:700;width:26px;flex-shrink:0">' + pos + '</span>';
+        s += '<span style="flex:1;font-size:12px;font-weight:600">' + (player ? player.name : '?') + (isMOTM ? ' 🏅' : '') + '</span>';
+        if (!isTitu) s += '<span style="font-size:9px;color:var(--muted);background:var(--surface);padding:1px 5px;border-radius:4px">Rempl.</span>';
+        if (ps.rating > 0) s += '<span style="font-size:12px;font-weight:700;color:' + (ps.rating >= 8 ? 'var(--green)' : ps.rating >= 6 ? 'var(--amber)' : 'var(--muted)') + '">' + ps.rating + '</span>';
+        if (ps.goals > 0) s += '<span style="font-size:11px">⚽' + ps.goals + '</span>';
+        if (ps.assists > 0) s += '<span style="font-size:11px">🎯' + ps.assists + '</span>';
+        if (ps.saves > 0) s += '<span style="font-size:11px">🧤' + ps.saves + '</span>';
+        if (ps.yellow_card) s += '<span style="font-size:12px">🟡</span>';
+        if (ps.red_card) s += '<span style="font-size:12px">🔴</span>';
+        s += '</div>';
+      });
+      s += '</div></div>';
+      return s;
+    })() : '') +
+
+    '<div style="display:flex;gap:8px;align-items:center;padding:8px 10px;background:var(--surface3);border-radius:8px">' +
+      '<span style="font-size:11px;color:var(--muted)">Note globale</span>' +
+      '<span style="font-size:14px;font-weight:700;color:var(--accent)">' + (match.note || '—') + '/5</span>' +
+      (match.repeated_opponent ? '<span style="font-size:11px;color:var(--amber);margin-left:auto">⚠ Adversaire répétitif</span>' : '') +
+    '</div>' +
+
+    '</div>' +
+  '</div>';
+
+  return html;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // MODIFIER MATCH
 // ══════════════════════════════════════════════════════════════════════════════
@@ -5388,10 +5567,13 @@ function renderCoachs() {
       if (matchCount > 0) {
         html += '<div class="coach-stats">';
         html += '<span class="coach-stat">' + stats.total + ' matchs</span>';
-        html += '<span class="coach-stat win">' + stats.winRate + '% victoires</span>';
+        html += '<span class="coach-stat win">' + stats.wins + 'V</span>';
+        html += '<span class="coach-stat" style="color:var(--amber)">' + stats.draws + 'N</span>';
+        html += '<span class="coach-stat" style="color:var(--red)">' + stats.losses + 'D</span>';
+        html += '<span class="coach-stat win">(' + stats.winRate + '%)</span>';
         html += '<span class="coach-stat">' + stats.goalsFor + ' buts</span>';
-        html += '<span class="coach-stat serie">⚡ Série record: ' + serie.record + '</span>';
-        if (serie.current > 0) html += '<span class="coach-stat serie-current">→ Actuelle: ' + serie.current + '</span>';
+        html += '<span class="coach-stat serie">⚡ Record: ' + serie.record + '</span>';
+        if (serie.current > 0) html += '<span class="coach-stat serie-current">→ ' + serie.current + '</span>';
         html += '</div>';
         // Barre victoires
         html += '<div class="an-bar-wrap" style="margin:4px 0 0">';
