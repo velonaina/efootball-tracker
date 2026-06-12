@@ -1703,20 +1703,36 @@ function renderPlayerMatchsTab(player) {
 }
 
 function renderMatchRow(match) {
-  // Bouton edit ajouté dans le rendu
   const resultClass = match.result === 'V' ? 'win' : match.result === 'N' ? 'draw' : 'loss';
   const resultLabel = match.result === 'V' ? 'V' : match.result === 'N' ? 'N' : 'D';
-  const buildName = match.efb_builds?.name || '—';
-  const date = new Date(match.played_at).toLocaleDateString('fr-FR');
+  const date = match.match_date
+    ? new Date(match.match_date).toLocaleDateString('fr-FR')
+    : new Date(match.played_at).toLocaleDateString('fr-FR');
+
+  const typeLabels = {
+    ligue_jcj_d1:'JCJ D1', ligue_jcj_d2:'JCJ D2', ligue_jcj_d3:'JCJ D3',
+    ligue_ia_d1:'IA D1', ligue_ia_d2:'IA D2', ligue_ia_d3:'IA D3',
+    event_jcj:'Évènement JCJ', event_ia:'Évènement IA', amical:'Amical', my_league:'My League',
+  };
+  const typeLabel = typeLabels[match.match_type] || match.match_type || '';
+  const coach = match.efb_coaches ? match.efb_coaches.name : null;
 
   return `
     <div class="match-row" id="match-row-${match.id}">
       <div class="match-result ${resultClass}">${resultLabel}</div>
       <div class="match-info">
-        <span class="match-score">${match.score_for} – ${match.score_against}</span>
-        <span class="match-meta">${buildName} · ${date}</span>
+        <div class="match-score-line">
+          <span class="match-score">${match.score_for} – ${match.score_against}</span>
+          <span class="match-opp">${match.opp_name || '—'}</span>
+        </div>
+        <div class="match-meta-line">
+          ${typeLabel ? `<span class="match-tag">${typeLabel}</span>` : ''}
+          ${match.formation ? `<span class="match-tag">${match.formation}</span>` : ''}
+          ${coach ? `<span class="match-tag coach"><i class="ti ti-whistle" style="font-size:9px"></i> ${coach}</span>` : ''}
+          ${match.rank ? `<span class="match-tag rank">🏅 ${match.rank}</span>` : ''}
+          <span class="match-date">${date}</span>
+        </div>
       </div>
-      <span class="match-rank">${match.rank || '—'}</span>
       <div class="match-actions">
         <button class="btn-icon" onclick="openModal('editMatch','${match.id}')" title="Modifier">
           <i class="ti ti-pencil"></i>
@@ -2172,22 +2188,200 @@ function renderSerieBlock(title, count, matches, type) {
 }
 
 // ── Onglet Matchs global ──────────────────────────────────────────────────────
+// ── Filtres matchs ────────────────────────────────────────────────────────────
+var _matchFilters = {
+  result: '',       // V | N | D | ''
+  matchType: '',
+  rank: '',
+  formation: '',
+  coach: '',
+  search: '',
+};
+var _matchSort = 'desc'; // desc | asc
+
+function setMatchFilter(key, val) {
+  _matchFilters[key] = val;
+  refreshMatchsGlobal();
+}
+
+function setMatchSort(val) {
+  _matchSort = val;
+  refreshMatchsGlobal();
+}
+
+function clearMatchFilters() {
+  _matchFilters = { result: '', matchType: '', rank: '', formation: '', coach: '', search: '' };
+  _matchSort = 'desc';
+  refreshMatchsGlobal();
+}
+
+function refreshMatchsGlobal() {
+  var el = document.querySelector('.matchs-page');
+  if (el) el.outerHTML = renderMatchsGlobal();
+}
+
+function getFilteredMatches() {
+  var f = _matchFilters;
+  var matches = State.matches.slice();
+
+  // Tri
+  matches.sort(function(a, b) {
+    var da = new Date(a.played_at), db = new Date(b.played_at);
+    return _matchSort === 'asc' ? da - db : db - da;
+  });
+
+  // Filtres
+  if (f.result)    matches = matches.filter(function(m) { return m.result === f.result; });
+  if (f.matchType) matches = matches.filter(function(m) { return m.match_type === f.matchType; });
+  if (f.rank)      matches = matches.filter(function(m) { return (m.rank || '') === f.rank; });
+  if (f.formation) matches = matches.filter(function(m) { return (m.formation || '') === f.formation; });
+  if (f.coach)     matches = matches.filter(function(m) { return (m.coach_id || '') === f.coach; });
+  if (f.search) {
+    var q = f.search.toLowerCase();
+    matches = matches.filter(function(m) {
+      return (m.opp_name || '').toLowerCase().includes(q) ||
+             (m.formation || '').toLowerCase().includes(q) ||
+             (m.match_type || '').toLowerCase().includes(q);
+    });
+  }
+  return matches;
+}
+
 function renderMatchsGlobal() {
-  return `
-    <div class="matchs-page">
-      <div class="matchs-page-header">
-        <span class="matchs-count">${State.matches.length} match${State.matches.length > 1 ? 's' : ''}</span>
-        <button class="btn-sm btn-primary" onclick="openModal('addMatch',null)">
-          + Enregistrer
-        </button>
+  var q = String.fromCharCode(39);
+  var filtered = getFilteredMatches();
+  var total = State.matches.length;
+  var f = _matchFilters;
+
+  // Options dynamiques depuis les matchs existants
+  var matchTypes = [...new Set(State.matches.map(function(m) { return m.match_type; }).filter(Boolean))];
+  var ranks = [...new Set(State.matches.map(function(m) { return m.rank; }).filter(Boolean))];
+  var formations = [...new Set(State.matches.map(function(m) { return m.formation; }).filter(Boolean))].sort();
+  var hasFilters = Object.values(f).some(function(v) { return v !== ''; }) || _matchSort !== 'desc';
+
+  // Labels match type
+  var typeLabels = {
+    ligue_jcj_d1: '🏆 Ligue JCJ D1', ligue_jcj_d2: '🏆 Ligue JCJ D2', ligue_jcj_d3: '🏆 Ligue JCJ D3',
+    ligue_ia_d1: '🤖 Ligue IA D1',  ligue_ia_d2: '🤖 Ligue IA D2',  ligue_ia_d3: '🤖 Ligue IA D3',
+    event_jcj: '🎯 Évènement JCJ', event_ia: '🎯 Évènement IA',
+    amical: '🤝 Amical', my_league: '⚽ My League',
+  };
+
+  return `<div class="matchs-page">
+    <style>
+      .matchs-search-bar{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:6px 10px;margin-bottom:8px}
+      .matchs-search-input{flex:1;background:none;border:none;outline:none;color:var(--text);font-size:13px}
+      .matchs-filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;align-items:center}
+      .mf-group{display:flex;gap:4px}
+      .mf-btn{padding:4px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);font-size:12px;font-weight:600;cursor:pointer}
+      .mf-btn:hover{border-color:var(--accent);color:var(--text)}
+      .mf-btn-active{background:var(--accent);color:#fff;border-color:var(--accent)}
+      .mf-btn-reset{background:var(--surface3);color:var(--red);border-color:var(--red)}
+      .mf-select{padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:12px;outline:none;cursor:pointer}
+      .mf-select:focus{border-color:var(--accent)}
+      .matchs-quick-stats{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--surface2);border-radius:8px;padding:6px 10px;margin-bottom:8px;font-size:12px}
+      .mqs-item{font-weight:600}.mqs-item.win{color:var(--green)}.mqs-item.draw{color:var(--amber)}.mqs-item.loss{color:var(--red)}.mqs-item.muted{color:var(--muted)}.mqs-sep{color:var(--border)}
+      .match-score-line{display:flex;align-items:center;gap:8px}
+      .match-opp{font-size:13px;font-weight:600;color:var(--text)}
+      .match-meta-line{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:2px}
+      .match-tag{font-size:10px;padding:1px 6px;border-radius:6px;background:var(--surface3);color:var(--muted)}
+      .match-tag.coach{color:var(--accent-light)}
+      .match-tag.rank{color:var(--gold)}
+      .match-date{font-size:10px;color:var(--muted);margin-left:auto}
+    </style>
+    <div class="matchs-page-header">
+      <span class="matchs-count">${filtered.length}${filtered.length !== total ? '/' + total : ''} match${total > 1 ? 's' : ''}</span>
+      <button class="btn-sm btn-primary" onclick="openModal('addMatch',null)">+ Enregistrer</button>
+    </div>
+
+    <!-- Barre de recherche -->
+    <div class="matchs-search-bar">
+      <i class="ti ti-search" style="color:var(--muted);font-size:14px"></i>
+      <input type="text" placeholder="Rechercher adversaire, formation..." value="${f.search}"
+        oninput="setMatchFilter('search', this.value)"
+        class="matchs-search-input">
+      ${f.search ? `<button class="btn-icon" onclick="setMatchFilter('search','')"><i class="ti ti-x"></i></button>` : ''}
+    </div>
+
+    <!-- Filtres -->
+    <div class="matchs-filters">
+      <!-- Résultat -->
+      <div class="mf-group">
+        ${['','V','N','D'].map(function(r) {
+          var labels = {'':'Tous', V:'✅ V', N:'🟡 N', D:'❌ D'};
+          var active = f.result === r;
+          return `<button class="mf-btn ${active ? 'mf-btn-active' : ''}" onclick="setMatchFilter('result','${r}')">${labels[r]}</button>`;
+        }).join('')}
       </div>
-      <div class="match-list">
-        ${State.matches.length === 0
-          ? `<div class="empty-state"><p>Aucun match enregistré</p></div>`
-          : State.matches.map(m => renderMatchRow(m)).join('')}
+
+      <!-- Type de match -->
+      <select class="mf-select" onchange="setMatchFilter('matchType', this.value)">
+        <option value="">Tous les types</option>
+        ${matchTypes.map(function(t) {
+          return `<option value="${t}" ${f.matchType === t ? 'selected' : ''}>${typeLabels[t] || t}</option>`;
+        }).join('')}
+      </select>
+
+      <!-- Rang -->
+      <select class="mf-select" onchange="setMatchFilter('rank', this.value)">
+        <option value="">Tous les rangs</option>
+        ${ranks.map(function(r) {
+          return `<option value="${r}" ${f.rank === r ? 'selected' : ''}>${r}</option>`;
+        }).join('')}
+      </select>
+
+      <!-- Formation -->
+      <select class="mf-select" onchange="setMatchFilter('formation', this.value)">
+        <option value="">Toutes formations</option>
+        ${formations.map(function(fm) {
+          return `<option value="${fm}" ${f.formation === fm ? 'selected' : ''}>${fm}</option>`;
+        }).join('')}
+      </select>
+
+      <!-- Coach -->
+      ${State.coaches.length > 0 ? `
+      <select class="mf-select" onchange="setMatchFilter('coach', this.value)">
+        <option value="">Tous les coachs</option>
+        ${State.coaches.map(function(c) {
+          return `<option value="${c.id}" ${f.coach === c.id ? 'selected' : ''}>${c.name}</option>`;
+        }).join('')}
+      </select>` : ''}
+
+      <!-- Tri + Reset -->
+      <div class="mf-group" style="margin-left:auto">
+        <button class="mf-btn ${_matchSort === 'desc' ? 'mf-btn-active' : ''}" onclick="setMatchSort('desc')" title="Plus récent">↓</button>
+        <button class="mf-btn ${_matchSort === 'asc' ? 'mf-btn-active' : ''}" onclick="setMatchSort('asc')" title="Plus ancien">↑</button>
+        ${hasFilters ? `<button class="mf-btn mf-btn-reset" onclick="clearMatchFilters()" title="Effacer filtres"><i class="ti ti-filter-off"></i></button>` : ''}
       </div>
     </div>
-  `;
+
+    <!-- Stats rapides des matchs filtrés -->
+    ${filtered.length > 0 ? (function() {
+      var wins = filtered.filter(function(m) { return m.result === 'V'; }).length;
+      var draws = filtered.filter(function(m) { return m.result === 'N'; }).length;
+      var losses = filtered.filter(function(m) { return m.result === 'D'; }).length;
+      var gf = filtered.reduce(function(s,m) { return s + (m.score_for||0); }, 0);
+      var ga = filtered.reduce(function(s,m) { return s + (m.score_against||0); }, 0);
+      var wr = Math.round(wins / filtered.length * 100);
+      return `<div class="matchs-quick-stats">
+        <span class="mqs-item win">${wins}V</span>
+        <span class="mqs-item draw">${draws}N</span>
+        <span class="mqs-item loss">${losses}D</span>
+        <span class="mqs-sep">·</span>
+        <span class="mqs-item">${wr}% victoires</span>
+        <span class="mqs-sep">·</span>
+        <span class="mqs-item">${gf} buts pour</span>
+        <span class="mqs-item muted">${ga} contre</span>
+      </div>`;
+    })() : ''}
+
+    <!-- Liste des matchs -->
+    <div class="match-list">
+      ${filtered.length === 0
+        ? `<div class="empty-state"><i class="ti ti-filter-off" style="font-size:32px;color:var(--border)"></i><p>${hasFilters ? 'Aucun match avec ces filtres' : 'Aucun match enregistré'}</p></div>`
+        : filtered.map(function(m) { return renderMatchRow(m); }).join('')}
+    </div>
+  </div>`;
 }
 
 // ── Modals ────────────────────────────────────────────────────────────────────
@@ -3084,7 +3278,8 @@ function saveFmEditor() {
     return { idx: s.idx, label: s.label, left: s.left, top: s.top };
   }));
   closeFmEditor();
-  selectFormation(name);
+  // Utiliser ftSelectFormation (onglet Formation) et non selectFormation (modal match)
+  ftSelectFormation(name);
 }
 
 function closeFmEditor() {
@@ -5222,22 +5417,23 @@ async function confirmDeleteCoach(coachId) {
 // Modal — Ajouter coach
 function renderModalAddCoach() {
   var q = String.fromCharCode(39);
-
-  // Grouper la base par tier pour l'affichage
-  var tierLabels = { S: '🥇 S Tier', A: '🥈 A Tier', B: '🥉 B Tier', C: '⚪ C Tier' };
-  var tiers = ['S', 'A', 'B', 'C'];
   var alreadyNames = State.coaches.map(function(c) { return c.name.toLowerCase(); });
 
-  var dbOptions = '<option value="">— Importer depuis la base —</option>';
-  tiers.forEach(function(tier) {
-    var coaches = EFB_COACHES_DB.filter(function(c) { return c.tier === tier; });
+  // Grouper par style pour le dropdown
+  var styles = ['Possession Game', 'Quick Counter', 'Long Ball Counter', 'Out Wide', 'Long Ball'];
+  var dbOptions = '<option value="">— Importer depuis la base (' + EFB_COACHES_DB.length + ' coachs) —</option>';
+  styles.forEach(function(style) {
+    var coaches = EFB_COACHES_DB.filter(function(c) { return c.style === style; });
     if (coaches.length === 0) return;
-    dbOptions += '<optgroup label="' + tierLabels[tier] + '">';
-    coaches.forEach(function(c, i) {
-      var already = alreadyNames.includes(c.name.toLowerCase());
+    dbOptions += '<optgroup label="' + style + '">';
+    coaches.forEach(function(c) {
       var idx = EFB_COACHES_DB.indexOf(c);
+      var already = alreadyNames.includes(c.name.toLowerCase());
+      var maxScore = Math.max(c.proficiency.possessionGame, c.proficiency.quickCounter, c.proficiency.longBallCounter, c.proficiency.outWide, c.proficiency.longBall);
+      var hasBoosters = c.boosters && c.boosters.length > 0;
+      var dateStr = c.releaseDate ? c.releaseDate.slice(0, 7) : '?';
       dbOptions += '<option value="' + idx + '"' + (already ? ' disabled' : '') + '>' +
-        c.name + ' — ' + c.style + (already ? ' ✓' : '') +
+        c.name + ' (' + maxScore + ')' + (hasBoosters ? ' ⚡' : '') + ' — ' + dateStr + (already ? ' ✓' : '') +
       '</option>';
     });
     dbOptions += '</optgroup>';
@@ -5247,13 +5443,12 @@ function renderModalAddCoach() {
     '<div class="modal-header"><h3>Ajouter un coach</h3><button class="btn-icon" onclick="closeModal()"><i class="ti ti-x"></i></button></div>' +
     '<div class="modal-body">' +
 
-    // Import depuis base
     '<div class="form-group" style="background:var(--surface3);border-radius:8px;padding:10px;margin-bottom:12px">' +
-      '<label style="color:var(--accent)"><i class="ti ti-database"></i> Import depuis la base (' + EFB_COACHES_DB.length + ' coachs)</label>' +
+      '<label style="color:var(--accent)"><i class="ti ti-database"></i> Import depuis la base</label>' +
       '<select id="mc-db-select" class="form-input" style="margin-top:6px" onchange="importCoachFromDB(this.value)">' +
         dbOptions +
       '</select>' +
-      '<div style="font-size:10px;color:var(--muted);margin-top:4px">Sélectionne un coach pour remplir automatiquement le formulaire</div>' +
+      '<div id="mc-db-preview" style="margin-top:8px;font-size:11px;color:var(--muted)">Sélectionne un coach pour remplir le formulaire automatiquement. ⚡ = a des boosters.</div>' +
     '</div>' +
 
     '<div class="form-group"><label>Nom *</label><input type="text" id="mc-name" class="form-input" placeholder="Ex: Xabi Alonso"></div>' +
@@ -5261,15 +5456,11 @@ function renderModalAddCoach() {
       '<div class="form-group"><label>Nationalité</label><input type="text" id="mc-nationality" class="form-input" placeholder="Ex: Espagnol"></div>' +
       '<div class="form-group"><label>Formation favorite</label><input type="text" id="mc-formation" class="form-input" placeholder="Ex: 4-3-3"></div>' +
     '</div>' +
-    '<div class="form-group"><label>Style de jeu</label><select id="mc-style" class="form-input">' +
+    '<div class="form-group"><label>Style principal</label><select id="mc-style" class="form-input">' +
       '<option value="">— Choisir —</option>' +
       EFB_COACH_STYLES.map(function(s) { return '<option value="' + s + '">' + s + '</option>'; }).join('') +
     '</select></div>' +
-    '<div class="form-group"><label>Tier</label><select id="mc-tier" class="form-input">' +
-      '<option value="">— Tier —</option>' +
-      ['S','A','B','C'].map(function(t) { return '<option value="' + t + '">' + tierLabels[t] + '</option>'; }).join('') +
-    '</select></div>' +
-    '<div class="form-group"><label>Notes</label><textarea id="mc-notes" class="form-input" rows="2" placeholder="Boosters, affinity, observations..."></textarea></div>' +
+    '<div class="form-group"><label>Notes (boosters, link-up play...)</label><textarea id="mc-notes" class="form-input" rows="3" placeholder="Ex: Low Pass +1, Defensive Engagement +1 | Link-Up: Over-the-Top Pass A"></textarea></div>' +
 
     '</div>' +
     '<div class="modal-footer">' +
@@ -5280,38 +5471,43 @@ function renderModalAddCoach() {
 }
 
 function importCoachFromDB(idxStr) {
-  if (!idxStr && idxStr !== 0) return;
+  if (idxStr === '' || idxStr === null || idxStr === undefined) return;
   var idx = parseInt(idxStr);
   if (isNaN(idx) || !EFB_COACHES_DB[idx]) return;
   var c = EFB_COACHES_DB[idx];
 
-  // Remplir le formulaire
-  var fields = {
-    'mc-name': c.name,
-    'mc-nationality': c.nationality || '',
-    'mc-formation': c.formation || '',
-  };
-  Object.entries(fields).forEach(function(entry) {
-    var el = document.getElementById(entry[0]);
-    if (el) el.value = entry[1];
-  });
+  // Remplir les champs
+  var nameEl = document.getElementById('mc-name');
+  if (nameEl) nameEl.value = c.name;
 
-  // Style
   var styleEl = document.getElementById('mc-style');
   if (styleEl) styleEl.value = c.style || '';
 
-  // Tier
-  var tierEl = document.getElementById('mc-tier');
-  if (tierEl) tierEl.value = c.tier || '';
+  var formEl = document.getElementById('mc-formation');
+  if (formEl) formEl.value = '';
 
-  // Notes auto
+  // Notes avec toutes les infos utiles
   var notesEl = document.getElementById('mc-notes');
   if (notesEl) {
     var parts = [];
     if (c.boosters && c.boosters.length > 0) parts.push('Boosters: ' + c.boosters.join(', '));
-    if (c.affinity) parts.push('Affinity: ' + c.affinity);
-    if (c.notes) parts.push(c.notes);
+    if (c.linkUpPlay) parts.push('Link-Up: ' + c.linkUpPlay + (c.linkUpCenterPiece ? ' | CP: ' + c.linkUpCenterPiece : '') + (c.linkUpKeyMan ? ' | KM: ' + c.linkUpKeyMan : ''));
+    if (c.releaseDate) parts.push('Sortie: ' + c.releaseDate);
     notesEl.value = parts.join(' | ');
+  }
+
+  // Preview des proficiency scores
+  var preview = document.getElementById('mc-db-preview');
+  if (preview && c.proficiency) {
+    var p = c.proficiency;
+    preview.innerHTML =
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">' +
+      '<span style="color:' + (p.possessionGame >= 85 ? 'var(--green)' : 'var(--muted)') + '">PG: ' + p.possessionGame + '</span>' +
+      '<span style="color:' + (p.quickCounter >= 85 ? 'var(--green)' : 'var(--muted)') + '">QC: ' + p.quickCounter + '</span>' +
+      '<span style="color:' + (p.longBallCounter >= 85 ? 'var(--green)' : 'var(--muted)') + '">LBC: ' + p.longBallCounter + '</span>' +
+      '<span style="color:' + (p.outWide >= 85 ? 'var(--green)' : 'var(--muted)') + '">OW: ' + p.outWide + '</span>' +
+      '<span style="color:' + (p.longBall >= 85 ? 'var(--green)' : 'var(--muted)') + '">LB: ' + p.longBall + '</span>' +
+      '</div>';
   }
 }
 
