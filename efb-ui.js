@@ -2403,7 +2403,7 @@ function openModal(type, id) {
   if (type === 'editBuild')  container.innerHTML = renderModalEditBuild(id);
   if (type === 'addMatch')   {
     container.innerHTML = renderModalAddMatch(id);
-    setTimeout(applyLastInstructions, 80);
+    setTimeout(applyLastInstructions, 100);
   }
   if (type === 'editMatch')  container.innerHTML = renderModalEditMatch(id);
   if (type === 'addCoach')   container.innerHTML = renderModalAddCoach();
@@ -3407,7 +3407,7 @@ function renderMatchTabMain() {
         '<option value="amical">🤝 Amical</option>' +
         '<option value="my_league">⚽ My League</option>' +
       '</select></div>' +
-      '<div class="form-group" style="flex:1"><label>Rang</label><select id="m-match-rank" class="form-input form-input-sm" onchange="onRankChange(this.value)">' +
+      '<div class="form-group" id="m-rank-group" style="flex:1"><label>Rang</label><select id="m-match-rank" class="form-input form-input-sm" onchange="onRankChange(this.value)">' +
         EFB_RANKS.map(function(r) { return '<option value="' + r + '">' + r + '</option>'; }).join('') +
       '</select></div>' +
     '</div>' +
@@ -4613,12 +4613,14 @@ var RANK_TYPES = ['ligue_ia_d1','ligue_ia_d2','ligue_ia_d3','event_ia','my_leagu
 
 function onMatchTypeChange(type) {
   autoUpdateResult();
-  var rankSel = document.getElementById('m-match-rank');
-  if (!rankSel) return;
-  var showRank = RANK_TYPES.includes(type);
-  var rankGroup = rankSel.closest('.form-group');
-  if (rankGroup) rankGroup.style.display = showRank ? '' : 'none';
-  if (!showRank) rankSel.value = '';
+  var rankGroup = document.getElementById('m-rank-group');
+  if (!rankGroup) return;
+  var showRank = !type || RANK_TYPES.includes(type);
+  rankGroup.style.display = showRank ? '' : 'none';
+  if (!showRank) {
+    var rankSel = document.getElementById('m-match-rank');
+    if (rankSel) rankSel.value = '';
+  }
 }
 
 function onRankChange(val) {
