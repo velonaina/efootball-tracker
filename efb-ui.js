@@ -3374,9 +3374,9 @@ function renderModalAddMatch(buildId) {
     '<div class="modal-header" style="background:var(--surface2);min-height:48px">' +
       '<h3>Enregistrer un match</h3>' +
       '<div style="display:flex;gap:4px;flex-shrink:0">' +
-        '<button style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:var(--surface3);color:var(--text);border:none;cursor:pointer" onclick="minimizeMatch()" title="Réduire"><i class="ti ti-minus"></i></button>' +
-        '<button style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:var(--surface3);color:var(--text);border:none;cursor:pointer" id="btn-fs-toggle" onclick="toggleMatchFullscreen()" title="Plein écran"><i class="ti ti-maximize" id="fs-icon"></i></button>' +
-        '<button style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:var(--surface3);color:var(--text);border:none;cursor:pointer" onclick="closeModal()"><i class="ti ti-x"></i></button>' +
+        '<button class="btn-icon" onclick="minimizeMatch()" title="Réduire"><i class="ti ti-minus"></i></button>' +
+        '<button class="btn-icon" id="btn-fs-toggle" onclick="toggleMatchFullscreen()" title="Plein écran"><i class="ti ti-maximize" id="fs-icon"></i></button>' +
+        '<button class="btn-icon" onclick="closeModal()"><i class="ti ti-x"></i></button>' +
       '</div>' +
     '</div>' +
     '<input type="hidden" id="m-match-date" value="' + todayDate + '">' +

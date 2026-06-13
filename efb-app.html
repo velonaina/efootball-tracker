@@ -771,11 +771,14 @@ input:focus, select:focus { border-color: var(--accent); }
 .fmeditor-controls { padding:14px 16px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; }
 .fmeditor-slots-list { background:var(--surface3); border-radius:var(--radius-md); padding:10px 12px; }
 .fmeditor-save-row { display:flex; gap:8px; }
+/* Fix boutons header modal match */
 .modal-match-fullscreen .modal-header {
   background: var(--surface2);
 }
-.modal-match-fullscreen .modal-header .btn-icon {
+.modal-match-fullscreen .modal-header > div > button.btn-icon {
   color: var(--text) !important;
+  background: var(--surface3);
+  border: 0.5px solid var(--border);
 }
 </style>
 </head>
