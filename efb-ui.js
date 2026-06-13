@@ -3,6 +3,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── État global ───────────────────────────────────────────────────────────────
+// ── Sync state ───────────────────────────────────────────────────────────────
+var _syncState = 'idle'; // idle | syncing | ok | error
+var _lastSyncTime = null;
+
 const State = {
   players: [],
   cards: {},       // { playerId: [cards] }
@@ -23,10 +27,79 @@ const State = {
 };
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+
+// ── Synchronisation globale vers Supabase ─────────────────────────────────────
+async function syncAllToSupabase() {
+  _syncState = 'syncing';
+  renderSyncBadge();
+  try {
+    // Squad 23
+    var squad = JSON.parse(localStorage.getItem(SQUAD_STORAGE_KEY) || '[]');
+    await AppState.set('squad23', squad);
+    // Formation lineup
+    var lineup = JSON.parse(localStorage.getItem(FT_STORAGE_KEY) || '{}');
+    await AppState.set('ft_lineup', lineup);
+    // Instructions
+    var instructions = JSON.parse(localStorage.getItem(INSTRUCTIONS_STORAGE_KEY) || '{}');
+    await AppState.set('last_instructions', instructions);
+    // Coach actif
+    var coach = localStorage.getItem(COACH_STORAGE_KEY) || null;
+    await AppState.set('active_coach', coach);
+    _syncState = 'ok';
+    _lastSyncTime = new Date();
+    renderSyncBadge();
+    showToast('Données synchronisées !', 'success', 2000);
+  } catch(e) {
+    _syncState = 'error';
+    renderSyncBadge();
+    showToast('Erreur sync : ' + e.message, 'error');
+  }
+}
+
+async function syncAllFromSupabase() {
+  try {
+    var all = await AppState.getAll();
+    // Squad 23
+    if (all.squad23) {
+      localStorage.setItem(SQUAD_STORAGE_KEY, JSON.stringify(all.squad23));
+    }
+    // Formation lineup
+    if (all.ft_lineup) {
+      localStorage.setItem(FT_STORAGE_KEY, JSON.stringify(all.ft_lineup));
+    }
+    // Instructions
+    if (all.last_instructions) {
+      localStorage.setItem(INSTRUCTIONS_STORAGE_KEY, JSON.stringify(all.last_instructions));
+    }
+    // Coach actif
+    if (all.active_coach) {
+      localStorage.setItem(COACH_STORAGE_KEY, all.active_coach);
+    }
+    _syncState = 'ok';
+    _lastSyncTime = new Date();
+  } catch(e) {
+    _syncState = 'error';
+    console.warn('Sync from Supabase échoué:', e);
+  }
+}
+
+function renderSyncBadge() {
+  var badge = document.getElementById('sync-badge');
+  if (!badge) return;
+  var colors = { idle: 'var(--muted)', syncing: 'var(--amber)', ok: 'var(--green)', error: 'var(--red)' };
+  var icons  = { idle: 'ti-cloud', syncing: 'ti-loader-2', ok: 'ti-cloud-check', error: 'ti-cloud-x' };
+  var labels = { idle: 'Sync', syncing: 'Sync...', ok: 'Synchronisé', error: 'Erreur sync' };
+  var spin = _syncState === 'syncing' ? ';animation:spin 1s linear infinite' : '';
+  var timeStr = _lastSyncTime ? ' · ' + _lastSyncTime.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'}) : '';
+  badge.innerHTML = '<i class="ti ' + icons[_syncState] + '" style="font-size:14px;color:' + colors[_syncState] + spin + '"></i>' +
+    '<span style="font-size:11px;color:' + colors[_syncState] + '">' + labels[_syncState] + timeStr + '</span>';
+}
+
 async function init() {
   renderSkeleton();
   loadAllCustomFormations();
   syncFormationsFromSupabase();
+  await syncAllFromSupabase();
   try {
     State.players = await Players.getAll();
     State.matches = await Matches.getAll();
@@ -180,7 +253,14 @@ function renderTopbar() {
         >
         ${State.search.query ? `<button class="topbar-search-clear" onclick="clearSearch(event)"><i class="ti ti-x"></i></button>` : ''}
       </div>
-      <span class="topbar-squad">Real Madrid</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button id="sync-badge" onclick="syncAllToSupabase()" title="Synchroniser toutes les données"
+          style="display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;background:var(--surface3);border:0.5px solid var(--border);cursor:pointer">
+          <i class="ti ti-cloud" style="font-size:14px;color:var(--muted)"></i>
+          <span style="font-size:11px;color:var(--muted)">Sync</span>
+        </button>
+        <span class="topbar-squad">Real Madrid</span>
+      </div>
     </header>
     ${State.search.open ? renderSearchOverlay() : ''}
   `;

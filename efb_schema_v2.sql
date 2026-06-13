@@ -137,3 +137,33 @@ CREATE TABLE efb_formations (
 ALTER TABLE efb_formations ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow all" ON efb_formations FOR ALL USING (true) WITH CHECK (true);
+
+-- ── App State (sync globale) ──────────────────────────────────────────────────
+CREATE TABLE efb_app_state (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  key TEXT UNIQUE NOT NULL,
+  value JSONB NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE efb_app_state ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all" ON efb_app_state FOR ALL USING (true) WITH CHECK (true);
+
+-- Données initiales
+INSERT INTO efb_app_state (key, value) VALUES
+  ('squad23', '[]'),
+  ('ft_lineup', '{}'),
+  ('last_instructions', '{}'),
+  ('active_coach', 'null')
+ON CONFLICT (key) DO NOTHING;
+
+-- ── Formations personnalisées ─────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS efb_formations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  slots JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE efb_formations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY IF NOT EXISTS "Allow all" ON efb_formations FOR ALL USING (true) WITH CHECK (true);

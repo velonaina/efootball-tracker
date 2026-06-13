@@ -141,6 +141,35 @@ const Formations = {
     });
   },
 };
+
+// ── APP STATE (sync globale) ──────────────────────────────────────────────────
+const AppState = {
+  async get(key) {
+    var rows = await sbFetch('efb_app_state?key=eq.' + encodeURIComponent(key) + '&select=*');
+    return rows && rows[0] ? rows[0].value : null;
+  },
+  async set(key, value) {
+    // Upsert via POST avec onConflict
+    return sbFetch('efb_app_state?key=eq.' + encodeURIComponent(key), {
+      method: 'PATCH',
+      body: JSON.stringify({ value: value, updated_at: new Date().toISOString() }),
+      prefer: 'return=minimal',
+    }).catch(async function() {
+      // Si PATCH échoue (ligne inexistante), on crée
+      return sbFetch('efb_app_state', {
+        method: 'POST',
+        body: JSON.stringify({ key: key, value: value }),
+        prefer: 'return=minimal',
+      });
+    });
+  },
+  async getAll() {
+    var rows = await sbFetch('efb_app_state?select=*');
+    var result = {};
+    (rows || []).forEach(function(r) { result[r.key] = r.value; });
+    return result;
+  },
+};
 // ── MATCHES ───────────────────────────────────────────────────────────────────
 const Matches = {
   getAll() {
