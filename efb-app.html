@@ -772,13 +772,30 @@ input:focus, select:focus { border-color: var(--accent); }
 .fmeditor-slots-list { background:var(--surface3); border-radius:var(--radius-md); padding:10px 12px; }
 .fmeditor-save-row { display:flex; gap:8px; }
 /* Fix boutons header modal match */
+.modal-match-fullscreen {
+  pointer-events: all;
+}
 .modal-match-fullscreen .modal-header {
   background: var(--surface2);
+  pointer-events: all;
 }
-.modal-match-fullscreen .modal-header > div > button.btn-icon {
-  color: var(--text) !important;
+.modal-match-fullscreen .modal-header > div > button {
+  pointer-events: all;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
   background: var(--surface3);
+  color: var(--text);
   border: 0.5px solid var(--border);
+  cursor: pointer;
+}
+.modal-match-fullscreen .modal-header > div > button i {
+  font-family: 'tabler-icons';
+  font-size: 16px;
+  color: var(--text);
 }
 </style>
 </head>
