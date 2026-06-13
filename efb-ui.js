@@ -3396,15 +3396,22 @@ var _matchIsFullscreen = false;
 function toggleMatchFullscreen() {
   _matchIsFullscreen = !_matchIsFullscreen;
   var modal = document.getElementById('modal-match-fs');
-  var container = document.getElementById('modal-container');
   var icon = document.getElementById('fs-icon');
   if (_matchIsFullscreen) {
-    if (container) { container.style.width = '100vw'; container.style.height = '100vh'; container.style.maxWidth = '100vw'; container.style.top = '0'; container.style.left = '0'; container.style.transform = 'none'; container.style.borderRadius = '0'; }
-    if (modal) modal.style.height = '100vh';
+    if (modal) {
+      modal.style.width = '100vw';
+      modal.style.maxWidth = '100vw';
+      modal.style.height = '100vh';
+      modal.style.borderRadius = '0';
+    }
     if (icon) icon.className = 'ti ti-minimize';
   } else {
-    if (container) { container.style.width = ''; container.style.height = ''; container.style.maxWidth = ''; container.style.top = ''; container.style.left = ''; container.style.transform = ''; container.style.borderRadius = ''; }
-    if (modal) modal.style.height = '';
+    if (modal) {
+      modal.style.width = '';
+      modal.style.maxWidth = '';
+      modal.style.height = '';
+      modal.style.borderRadius = '';
+    }
     if (icon) icon.className = 'ti ti-maximize';
   }
 }
