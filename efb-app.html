@@ -275,6 +275,7 @@ input:focus, select:focus { border-color: var(--accent); }
 /* ── Modal ───────────────────────────────────────────────────────────────── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; }
 .modal-container { position: fixed; inset: 0; z-index: 101; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.modal-match-fullscreen .modal-header { pointer-events: all; }
 .match-floating-bar { position:fixed; bottom:0; left:50%; transform:translateX(-50%); z-index:102; background:var(--surface2); border:1px solid var(--accent); border-bottom:none; border-radius:10px 10px 0 0; padding:8px 16px; display:flex; align-items:center; gap:12px; pointer-events:all; cursor:pointer; box-shadow:0 -4px 20px rgba(0,0,0,0.4); }
 .match-floating-bar:hover { background:var(--surface3); }
 .modal { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius-lg); width: 440px; max-height: 90vh; display: flex; flex-direction: column; pointer-events: all; overflow: hidden; }
@@ -468,6 +469,25 @@ input:focus, select:focus { border-color: var(--accent); }
   flex-direction: column;
   overflow: hidden;
   pointer-events: all;
+}
+.modal-match-fullscreen .modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 0.5px solid var(--border);
+  flex-shrink: 0;
+  pointer-events: all !important;
+}
+.modal-match-fullscreen .modal-header button {
+  pointer-events: all !important;
+  display: flex !important;
+  visibility: visible !important;
+}
+.modal-match-fullscreen .modal-header > div {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
 }
 .modal-match-body {
   flex: 1;
@@ -749,6 +769,12 @@ input:focus, select:focus { border-color: var(--accent); }
 .fmeditor-controls { padding:14px 16px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; }
 .fmeditor-slots-list { background:var(--surface3); border-radius:var(--radius-md); padding:10px 12px; }
 .fmeditor-save-row { display:flex; gap:8px; }
+.modal-match-fullscreen .modal-header {
+  background: var(--surface2);
+}
+.modal-match-fullscreen .modal-header .btn-icon {
+  color: var(--text) !important;
+}
 </style>
 </head>
 <body>
