@@ -48,6 +48,8 @@ input:focus, select:focus { border-color: var(--accent); }
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
+  position: relative;
+  z-index: 10;
 }
 .topbar-left { display: flex; align-items: center; gap: 8px; }
 .topbar-logo { font-size: 18px; }
@@ -273,8 +275,8 @@ input:focus, select:focus { border-color: var(--accent); }
 .result-btn.active[data-val="D"] { background: #2a0f0f; border-color: var(--red); color: var(--red); }
 
 /* ── Modal ───────────────────────────────────────────────────────────────── */
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; }
-.modal-container { position: fixed; inset: 0; z-index: 101; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; }
+.modal-container { position: fixed; inset: 0; z-index: 1001; display: flex; align-items: center; justify-content: center; pointer-events: none; padding-top: 0; }
 .modal-match-fullscreen .modal-header { pointer-events: all; }
 .match-floating-bar { position:fixed; bottom:0; left:50%; transform:translateX(-50%); z-index:102; background:var(--surface2); border:1px solid var(--accent); border-bottom:none; border-radius:10px 10px 0 0; padding:8px 16px; display:flex; align-items:center; gap:12px; pointer-events:all; cursor:pointer; box-shadow:0 -4px 20px rgba(0,0,0,0.4); }
 .match-floating-bar:hover { background:var(--surface3); }
