@@ -83,6 +83,64 @@ async function selectCard(cardId) {
   }
 }
 
+// ── Système de toasts ─────────────────────────────────────────────────────────
+var _toastTimeout = null;
+
+function showToast(msg, type, duration) {
+  type = type || 'info'; // info | success | error | warning
+  duration = duration || 3000;
+  var existing = document.getElementById('efb-toast');
+  if (existing) existing.remove();
+  if (_toastTimeout) clearTimeout(_toastTimeout);
+  var colors = {
+    success: 'var(--green)',
+    error: 'var(--red)',
+    warning: 'var(--amber)',
+    info: 'var(--accent)',
+  };
+  var icons = {
+    success: 'ti-circle-check',
+    error: 'ti-circle-x',
+    warning: 'ti-alert-triangle',
+    info: 'ti-info-circle',
+  };
+  var toast = document.createElement('div');
+  toast.id = 'efb-toast';
+  toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;background:var(--surface2);border:1px solid ' + colors[type] + ';border-radius:10px;padding:10px 18px;display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--text);box-shadow:0 4px 20px rgba(0,0,0,0.5);max-width:360px;animation:toastIn 0.2s ease';
+  toast.innerHTML = '<i class="ti ' + icons[type] + '" style="color:' + colors[type] + ';font-size:16px;flex-shrink:0"></i><span>' + msg + '</span>';
+  document.body.appendChild(toast);
+  _toastTimeout = setTimeout(function() {
+    toast.style.animation = 'toastOut 0.2s ease forwards';
+    setTimeout(function() { if (toast.parentNode) toast.remove(); }, 200);
+  }, duration);
+  if (!document.getElementById('efb-toast-style')) {
+    var style = document.createElement('style');
+    style.id = 'efb-toast-style';
+    style.textContent = '@keyframes toastIn{from{opacity:0;transform:translateX(-50%) translateY(10px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}@keyframes toastOut{from{opacity:1}to{opacity:0;transform:translateX(-50%) translateY(10px)}}';
+    document.head.appendChild(style);
+  }
+}
+
+function showConfirm(msg, onConfirm) {
+  var existing = document.getElementById('efb-confirm');
+  if (existing) existing.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'efb-confirm';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center';
+  overlay.innerHTML = '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:20px 24px;max-width:320px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.5)">' +
+    '<div style="font-size:13px;color:var(--text);line-height:1.5;margin-bottom:16px">' + msg + '</div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+      '<button class="btn-sm btn-ghost" onclick="document.getElementById(' + String.fromCharCode(39) + 'efb-confirm' + String.fromCharCode(39) + ').remove()">Annuler</button>' +
+      '<button class="btn-sm btn-primary" id="efb-confirm-ok">Confirmer</button>' +
+    '</div>' +
+  '</div>';
+  document.body.appendChild(overlay);
+  document.getElementById('efb-confirm-ok').onclick = function() {
+    overlay.remove();
+    onConfirm();
+  };
+}
+
 // ── Render principal ──────────────────────────────────────────────────────────
 function render() {
   document.getElementById('app').innerHTML = `
@@ -3259,7 +3317,7 @@ function fmEditorReset() {
 
 function saveFmEditor() {
   var name = (document.getElementById('fmeditor-name')?.value || '').trim();
-  if (!name) { alert('Donne un nom à ta formation'); return; }
+  if (!name) { showToast('Donne un nom à ta formation', 'warning'); return; }
 
   // Vérifier si le nom est une formation builtin
   var isBuiltin = FORMATION_LAYOUTS[name] && !FORMATION_LAYOUTS[name]._custom_slots;
@@ -3271,7 +3329,7 @@ function saveFmEditor() {
       inp.value = '';
       setTimeout(function() { inp.style.borderColor = ''; }, 2000);
     }
-    alert('Le nom "' + name + '" est une formation standard. Choisis un nom différent (ex: "Mon ' + name + '").');
+    showToast('Nom réservé — choisis un autre (ex: "Mon ' + name + '")', 'warning', 4000);
     return;
   }
 
@@ -3395,7 +3453,7 @@ function renderMatchTabMain() {
 
   rightCol += '<div class="match-infos-compact">' +
     '<div class="mic-row">' +
-      '<div class="form-group" style="flex:1"><label>Type</label><select id="m-match-type" class="form-input form-input-sm">' +
+      '<div class="form-group" style="flex:1"><label>Type</label><select id="m-match-type" class="form-input form-input-sm" onchange="onMatchTypeChange(this.value)">' +
         '<option value="ligue_jcj_d1">🏆 Ligue JCJ D1</option>' +
         '<option value="ligue_jcj_d2">🏆 Ligue JCJ D2</option>' +
         '<option value="ligue_jcj_d3">🏆 Ligue JCJ D3</option>' +
@@ -4653,7 +4711,7 @@ async function savePlayer() {
     await selectPlayer(player.id);
     closeModal();
     render();
-  } catch(e) { alert('Erreur : ' + e.message); }
+  } catch(e) { showToast('Erreur : ' + e.message, 'error'); }
 }
 
 async function updatePlayer(playerId) {
@@ -4665,7 +4723,7 @@ async function updatePlayer(playerId) {
     State.players = await Players.getAll();
     closeModal();
     render();
-  } catch(e) { alert('Erreur : ' + e.message); }
+  } catch(e) { showToast('Erreur : ' + e.message, 'error'); }
 }
 
 async function saveCard(playerId) {
@@ -4694,7 +4752,7 @@ async function saveCard(playerId) {
     window._cardEfhubData = null;
     closeModal();
     render();
-  } catch(e) { alert('Erreur : ' + e.message); }
+  } catch(e) { showToast('Erreur : ' + e.message, 'error'); }
 }
 
 async function saveBuild(cardId) {
@@ -4715,7 +4773,7 @@ async function saveBuild(cardId) {
 async function saveMatch() {
   const buildId = document.getElementById('m-match-build')?.value;
   const result = document.getElementById('m-match-result')?.value;
-  if (!result) { alert('Sélectionne un résultat'); return; }
+  if (!result) { showToast('Sélectionne un résultat', 'warning'); return; }
   // Vérifier que les 11 titulaires ont tous une note
   var titulairesPids = _matchTitulaires.map(function(t) { return t.player_id; }).filter(Boolean);
   var notesManquantes = titulairesPids.filter(function(pid) {
@@ -4726,7 +4784,7 @@ async function saveMatch() {
       var p = State.players.find(function(x) { return x.id === pid; });
       return p ? p.name : pid;
     });
-    alert('Notes manquantes pour : ' + names.join(', ') + '\n\nTous les titulaires doivent avoir une note avant d\'enregistrer.');
+    showToast('Notes manquantes : ' + names.join(', '), 'warning', 5000);
     return;
   }
   saveLastInstructions();
@@ -4787,11 +4845,12 @@ async function saveMatch() {
     _matchPlayerStats = {};
     closeModal();
     render();
-  } catch(e) { alert('Erreur : ' + e.message); }
+    showToast('Match enregistré !', 'success');
+  } catch(e) { showToast('Erreur : ' + e.message, 'error'); }
 }
 
 async function confirmDelete(type, id) {
-  if (!confirm('Supprimer définitivement ?')) return;
+  showConfirm('Supprimer définitivement ?', async function() {
   try {
     if (type === 'player') {
       await Players.delete(id);
@@ -4810,7 +4869,8 @@ async function confirmDelete(type, id) {
       State.matches = await Matches.getAll();
     }
     render();
-  } catch(e) { alert('Erreur : ' + e.message); }
+  } catch(e) { showToast('Erreur : ' + e.message, 'error'); }
+  });
 }
 
 // ── Nouvelles fonctionnalités ─────────────────────────────────────────────────
@@ -5138,7 +5198,7 @@ function addTrendingToSquad23(cardId) {
   if (_squad23.find(function(s) { return s.player_id === pid; })) return;
 
   if (_squad23.length >= 23) {
-    alert('La sélection est déjà complète (23 joueurs)');
+    showToast('Sélection complète (23 joueurs)', 'warning');
     return;
   }
 
@@ -5171,7 +5231,7 @@ function addBuildToSquad23(buildId) {
 
   // Vérifier la limite de 23
   if (_squad23.length >= 23) {
-    alert('La sélection est déjà complète (23 joueurs)');
+    showToast('Sélection complète (23 joueurs)', 'warning');
     return;
   }
 
@@ -5213,11 +5273,12 @@ function updateSquad23Build(idx, buildId) {
 }
 
 function clearSquad23() {
-  if (!confirm('Effacer toute la composition ?')) return;
+  showConfirm('Effacer toute la composition ?', function() {
   _squad23 = [];
   saveSquad23();
   var el = document.getElementById('squad23-container');
   if (el) el.innerHTML = renderSquad23Section();
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -5285,7 +5346,7 @@ async function updateBuild(buildId) {
     Object.keys(_buildSliders).forEach(function(k) { delete _buildSliders[k]; });
     closeModal();
     render();
-  } catch(e) { alert('Erreur : ' + e.message); }
+  } catch(e) { showToast('Erreur : ' + e.message, 'error'); }
 }
 
 // ── DÉTAIL MATCH (read-only) ──────────────────────────────────────────────────
@@ -5442,8 +5503,27 @@ function renderModalEditMatch(matchId) {
 
     '<div class="form-row">' +
       '<div class="form-group"><label>Adversaire</label><input type="text" id="em-opp" class="form-input" value="' + (match.opp_name || '') + '"></div>' +
+      '<div class="form-group"><label>Type</label><select id="em-type" class="form-input">' +
+        '<option value="ligue_jcj_d1"' + (match.match_type === 'ligue_jcj_d1' ? ' selected' : '') + '>🏆 Ligue JCJ D1</option>' +
+        '<option value="ligue_jcj_d2"' + (match.match_type === 'ligue_jcj_d2' ? ' selected' : '') + '>🏆 Ligue JCJ D2</option>' +
+        '<option value="ligue_jcj_d3"' + (match.match_type === 'ligue_jcj_d3' ? ' selected' : '') + '>🏆 Ligue JCJ D3</option>' +
+        '<option value="ligue_ia_d1"' + (match.match_type === 'ligue_ia_d1' ? ' selected' : '') + '>🤖 Ligue IA D1</option>' +
+        '<option value="ligue_ia_d2"' + (match.match_type === 'ligue_ia_d2' ? ' selected' : '') + '>🤖 Ligue IA D2</option>' +
+        '<option value="ligue_ia_d3"' + (match.match_type === 'ligue_ia_d3' ? ' selected' : '') + '>🤖 Ligue IA D3</option>' +
+        '<option value="event_jcj"' + (match.match_type === 'event_jcj' ? ' selected' : '') + '>🎯 Évènement JCJ</option>' +
+        '<option value="event_ia"' + (match.match_type === 'event_ia' ? ' selected' : '') + '>🎯 Évènement IA</option>' +
+        '<option value="amical"' + (match.match_type === 'amical' ? ' selected' : '') + '>🤝 Amical</option>' +
+        '<option value="my_league"' + (match.match_type === 'my_league' ? ' selected' : '') + '>⚽ My League</option>' +
+      '</select></div>' +
+    '</div>' +
+    '<div class="form-row">' +
       '<div class="form-group"><label>Rang</label><select id="em-rank" class="form-input">' +
+        '<option value="">— Sans rang —</option>' +
         EFB_RANKS.map(function(r) { return '<option value="' + r + '"' + (match.rank === r ? ' selected' : '') + '>' + r + '</option>'; }).join('') +
+      '</select></div>' +
+      '<div class="form-group"><label><i class="ti ti-whistle" style="font-size:11px"></i> Coach</label><select id="em-coach" class="form-input">' +
+        '<option value="">— Sans coach —</option>' +
+        State.coaches.map(function(c) { return '<option value="' + c.id + '"' + (match.coach_id === c.id ? ' selected' : '') + '>' + c.name + '</option>'; }).join('') +
       '</select></div>' +
     '</div>' +
 
@@ -5485,10 +5565,12 @@ function renderModalEditMatch(matchId) {
 
 async function saveEditMatch(matchId) {
   var result = document.getElementById('m-match-result')?.value;
-  if (!result) { alert('Sélectionne un résultat'); return; }
+  if (!result) { showToast('Sélectionne un résultat', 'warning'); return; }
   var data = {
     opp_name: document.getElementById('em-opp')?.value?.trim() || null,
-    rank: document.getElementById('em-rank')?.value,
+    match_type: document.getElementById('em-type')?.value || null,
+    rank: document.getElementById('em-rank')?.value || null,
+    coach_id: document.getElementById('em-coach')?.value || null,
     result: result,
     score_for: parseInt(document.getElementById('em-score-for')?.value) || 0,
     score_against: parseInt(document.getElementById('em-score-against')?.value) || 0,
@@ -5503,7 +5585,8 @@ async function saveEditMatch(matchId) {
     State.matches = await Matches.getAll();
     closeModal();
     render();
-  } catch(e) { alert('Erreur : ' + e.message); }
+    showToast('Match modifié !', 'success');
+  } catch(e) { showToast('Erreur : ' + e.message, 'error'); }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -5626,13 +5709,14 @@ function toggleActiveCoach(coachId) {
 }
 
 async function confirmDeleteCoach(coachId) {
-  if (!confirm('Supprimer ce coach ?')) return;
+  showConfirm('Supprimer ce coach ?', async function() {
   try {
     await Coaches.delete(coachId);
     State.coaches = await Coaches.getAll();
     if (getActiveCoachId() === coachId) setActiveCoachId(null);
     render();
-  } catch(e) { alert('Erreur : ' + e.message); }
+  } catch(e) { showToast('Erreur : ' + e.message, 'error'); }
+  });
 }
 
 // Modal — Ajouter coach
@@ -5760,7 +5844,7 @@ function renderModalEditCoach(coachId) {
 
 async function saveCoach() {
   var name = document.getElementById('mc-name')?.value?.trim();
-  if (!name) { alert('Le nom est obligatoire'); return; }
+  if (!name) { showToast('Le nom est obligatoire', 'warning'); return; }
   var data = {
     name: name,
     nationality: document.getElementById('mc-nationality')?.value?.trim() || null,
@@ -5773,7 +5857,8 @@ async function saveCoach() {
     State.coaches = await Coaches.getAll();
     closeModal();
     render();
-  } catch(e) { alert('Erreur : ' + e.message); }
+    showToast('Coach ajouté !', 'success');
+  } catch(e) { showToast('Erreur : ' + e.message, 'error'); }
 }
 
 async function updateCoach(coachId) {
@@ -5791,5 +5876,6 @@ async function updateCoach(coachId) {
     State.coaches = await Coaches.getAll();
     closeModal();
     render();
-  } catch(e) { alert('Erreur : ' + e.message); }
+    showToast('Coach modifié !', 'success');
+  } catch(e) { showToast('Erreur : ' + e.message, 'error'); }
 }
