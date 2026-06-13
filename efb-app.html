@@ -276,7 +276,7 @@ input:focus, select:focus { border-color: var(--accent); }
 
 /* ── Modal ───────────────────────────────────────────────────────────────── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; }
-.modal-container { position: fixed; inset: 0; z-index: 1001; display: flex; align-items: center; justify-content: center; pointer-events: none; padding-top: 0; }
+.modal-container { position: fixed; left: 0; right: 0; bottom: 0; top: 51px; z-index: 1001; display: flex; align-items: center; justify-content: center; pointer-events: none; }
 .modal-match-fullscreen .modal-header { pointer-events: all; }
 .match-floating-bar { position:fixed; bottom:0; left:50%; transform:translateX(-50%); z-index:102; background:var(--surface2); border:1px solid var(--accent); border-bottom:none; border-radius:10px 10px 0 0; padding:8px 16px; display:flex; align-items:center; gap:12px; pointer-events:all; cursor:pointer; box-shadow:0 -4px 20px rgba(0,0,0,0.4); }
 .match-floating-bar:hover { background:var(--surface3); }
