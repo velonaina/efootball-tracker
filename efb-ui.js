@@ -3,6 +3,49 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── État global ───────────────────────────────────────────────────────────────
+
+// ── Authentification ──────────────────────────────────────────────────────────
+var EFB_SECRET = 'HARVEL_efb2026';
+var EFB_AUTH_KEY = 'efb_auth';
+
+function isAuthenticated() {
+  return localStorage.getItem(EFB_AUTH_KEY) === EFB_SECRET;
+}
+
+function renderAuthScreen() {
+  document.getElementById('app').innerHTML =
+    '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:20px;background:var(--bg)">' +
+      '<div style="font-size:32px">&#9917;</div>' +
+      '<div style="font-size:18px;font-weight:700;color:#fff">eFootball Tracker</div>' +
+      '<div style="font-size:13px;color:var(--muted)">Real Madrid</div>' +
+      '<div style="display:flex;flex-direction:column;gap:10px;width:280px;margin-top:12px">' +
+        '<input type="password" id="auth-input" placeholder="Mot de passe..." ' +
+          'style="padding:10px 14px;border-radius:10px;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-size:14px;outline:none;text-align:center" ' +
+          'onkeydown="if(event.key===String.fromCharCode(69,110,116,101,114))checkAuth()">' +
+        '<button onclick="checkAuth()" ' +
+          'style="padding:10px;border-radius:10px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer">Accéder</button>' +
+        '<div id="auth-error" style="color:var(--red);font-size:12px;text-align:center;display:none">Mot de passe incorrect</div>' +
+      '</div>' +
+    '</div>';
+  setTimeout(function() {
+    var inp = document.getElementById('auth-input');
+    if (inp) inp.focus();
+  }, 100);
+}
+
+function checkAuth() {
+  var val = document.getElementById('auth-input') ? document.getElementById('auth-input').value.trim() : '';
+  if (val === EFB_SECRET) {
+    localStorage.setItem(EFB_AUTH_KEY, EFB_SECRET);
+    init();
+  } else {
+    var err = document.getElementById('auth-error');
+    if (err) err.style.display = 'block';
+    var inp = document.getElementById('auth-input');
+    if (inp) { inp.value = ''; inp.focus(); }
+  }
+}
+
 // ── Sync state ───────────────────────────────────────────────────────────────
 var _syncState = 'idle'; // idle | syncing | ok | error
 var _lastSyncTime = null;
@@ -96,6 +139,7 @@ function renderSyncBadge() {
 }
 
 async function init() {
+  if (!isAuthenticated()) { renderAuthScreen(); return; }
   renderSkeleton();
   loadAllCustomFormations();
   syncFormationsFromSupabase();
