@@ -3370,10 +3370,13 @@ function renderModalAddMatch(buildId) {
     }).join('') +
   '</div>';
 
-  return '<div class="modal-match-fullscreen">' +
+  return '<div class="modal-match-fullscreen" id="modal-match-fs">' +
     '<div class="modal-header">' +
       '<h3>Enregistrer un match</h3>' +
-      '<button class="btn-icon" onclick="closeModal()"><i class="ti ti-x"></i></button>' +
+      '<div style="display:flex;gap:4px">' +
+        '<button class="btn-icon" id="btn-fs-toggle" onclick="toggleMatchFullscreen()" title="Plein écran"><i class="ti ti-maximize" id="fs-icon"></i></button>' +
+        '<button class="btn-icon" onclick="closeModal()"><i class="ti ti-x"></i></button>' +
+      '</div>' +
     '</div>' +
     '<input type="hidden" id="m-match-date" value="' + todayDate + '">' +
     '<input type="hidden" id="m-match-time" value="' + nowTime + '">' +
@@ -3388,6 +3391,23 @@ function renderModalAddMatch(buildId) {
 }
 
 var _matchLastFormation = '';
+var _matchIsFullscreen = false;
+
+function toggleMatchFullscreen() {
+  _matchIsFullscreen = !_matchIsFullscreen;
+  var modal = document.getElementById('modal-match-fs');
+  var container = document.getElementById('modal-container');
+  var icon = document.getElementById('fs-icon');
+  if (_matchIsFullscreen) {
+    if (container) { container.style.width = '100vw'; container.style.height = '100vh'; container.style.maxWidth = '100vw'; container.style.top = '0'; container.style.left = '0'; container.style.transform = 'none'; container.style.borderRadius = '0'; }
+    if (modal) modal.style.height = '100vh';
+    if (icon) icon.className = 'ti ti-minimize';
+  } else {
+    if (container) { container.style.width = ''; container.style.height = ''; container.style.maxWidth = ''; container.style.top = ''; container.style.left = ''; container.style.transform = ''; container.style.borderRadius = ''; }
+    if (modal) modal.style.height = '';
+    if (icon) icon.className = 'ti ti-maximize';
+  }
+}
 
 function renderMatchTabContent() {
   if (_matchActiveTab === 'match')  return renderMatchTabMain();
