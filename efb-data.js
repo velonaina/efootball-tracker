@@ -110,6 +110,37 @@ const Coaches = {
   },
 };
 
+
+// ── FORMATIONS ────────────────────────────────────────────────────────────────
+const Formations = {
+  getAll() {
+    return sbFetch('efb_formations?select=*&order=created_at.asc');
+  },
+  create(name, slots) {
+    return sbFetch('efb_formations', {
+      method: 'POST',
+      body: JSON.stringify({ name, slots })
+    }).then(r => r[0]);
+  },
+  update(id, name, slots) {
+    return sbFetch('efb_formations?id=eq.' + id, {
+      method: 'PATCH',
+      body: JSON.stringify({ name, slots })
+    }).then(r => r[0]);
+  },
+  delete(id) {
+    return sbFetch('efb_formations?id=eq.' + id, {
+      method: 'DELETE',
+      prefer: 'return=minimal'
+    });
+  },
+  deleteByName(name) {
+    return sbFetch('efb_formations?name=eq.' + encodeURIComponent(name), {
+      method: 'DELETE',
+      prefer: 'return=minimal'
+    });
+  },
+};
 // ── MATCHES ───────────────────────────────────────────────────────────────────
 const Matches = {
   getAll() {

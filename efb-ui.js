@@ -26,6 +26,7 @@ const State = {
 async function init() {
   renderSkeleton();
   loadAllCustomFormations();
+  syncFormationsFromSupabase();
   try {
     State.players = await Players.getAll();
     State.matches = await Matches.getAll();
@@ -2862,15 +2863,31 @@ function loadCustomFormations() {
   } catch(e) { return {}; }
 }
 
+// Charger les formations depuis Supabase et synchroniser avec localStorage
+async function syncFormationsFromSupabase() {
+  try {
+    var remote = await Formations.getAll();
+    if (!remote || remote.length === 0) return;
+    var customs = {};
+    remote.forEach(function(f) {
+      customs[f.name] = { slots: f.slots, custom: true, supabase_id: f.id };
+    });
+    localStorage.setItem(CUSTOM_FORMATIONS_KEY, JSON.stringify(customs));
+    loadAllCustomFormations();
+  } catch(e) { console.warn('Sync formations Supabase échoué:', e); }
+}
+
 function saveCustomFormation(name, slots) {
   try {
     var customs = loadCustomFormations();
-    // Stocker comme layout plat : [{left, top, label}]
     customs[name] = { slots: slots, custom: true };
     localStorage.setItem(CUSTOM_FORMATIONS_KEY, JSON.stringify(customs));
-    // Injecter dans FORMATION_LAYOUTS pour utilisation immédiate
     injectCustomFormation(name, slots);
   } catch(e) {}
+  // Sauvegarder dans Supabase
+  Formations.create(name, slots).catch(function(e) {
+    console.warn('Sauvegarde Supabase formation échouée:', e);
+  });
 }
 
 function deleteCustomFormation(name) {
@@ -2881,6 +2898,10 @@ function deleteCustomFormation(name) {
     delete FORMATION_LAYOUTS[name];
     delete POSITION_LABELS_BY_FORMATION[name];
   } catch(e) {}
+  // Supprimer dans Supabase
+  Formations.deleteByName(name).catch(function(e) {
+    console.warn('Suppression Supabase formation échouée:', e);
+  });
 }
 
 function injectCustomFormation(name, slots) {

@@ -125,3 +125,15 @@ INSERT INTO efb_config (key, value) VALUES
   ('match_types', '["ligue_jcj_d1","ligue_jcj_d2","ligue_jcj_d3","ligue_ia_d1","ligue_ia_d2","ligue_ia_d3","event_jcj","event_ia","amical","my_league"]'),
   ('ranks', '["Professionnel","Superstar","Légende"]'),
   ('opp_levels', '["faible","moyen","fort","elite"]');
+
+-- ── Formations personnalisées ─────────────────────────────────────────────────
+CREATE TABLE efb_formations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  slots JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE efb_formations ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow all" ON efb_formations FOR ALL USING (true) WITH CHECK (true);
