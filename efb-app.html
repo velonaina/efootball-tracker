@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>eFootball Tracker — Real Madrid</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/tabler-icons.min.css">
 <style>
 /* ── Reset & Base ─────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -275,6 +275,8 @@ input:focus, select:focus { border-color: var(--accent); }
 /* ── Modal ───────────────────────────────────────────────────────────────── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; }
 .modal-container { position: fixed; inset: 0; z-index: 101; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.match-floating-bar { position:fixed; bottom:0; left:50%; transform:translateX(-50%); z-index:102; background:var(--surface2); border:1px solid var(--accent); border-bottom:none; border-radius:10px 10px 0 0; padding:8px 16px; display:flex; align-items:center; gap:12px; pointer-events:all; cursor:pointer; box-shadow:0 -4px 20px rgba(0,0,0,0.4); }
+.match-floating-bar:hover { background:var(--surface3); }
 .modal { background: var(--surface); border: 0.5px solid var(--border); border-radius: var(--radius-lg); width: 440px; max-height: 90vh; display: flex; flex-direction: column; pointer-events: all; overflow: hidden; }
 .modal-lg { width: 560px; }
 .modal-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 0.5px solid var(--border); flex-shrink: 0; }

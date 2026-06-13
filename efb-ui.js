@@ -3374,6 +3374,7 @@ function renderModalAddMatch(buildId) {
     '<div class="modal-header">' +
       '<h3>Enregistrer un match</h3>' +
       '<div style="display:flex;gap:4px">' +
+        '<button class="btn-icon" onclick="minimizeMatch()" title="Réduire"><i class="ti ti-minus"></i></button>' +
         '<button class="btn-icon" id="btn-fs-toggle" onclick="toggleMatchFullscreen()" title="Plein écran"><i class="ti ti-maximize" id="fs-icon"></i></button>' +
         '<button class="btn-icon" onclick="closeModal()"><i class="ti ti-x"></i></button>' +
       '</div>' +
@@ -3392,6 +3393,49 @@ function renderModalAddMatch(buildId) {
 
 var _matchLastFormation = '';
 var _matchIsFullscreen = false;
+var _matchMinimized = false;
+
+function minimizeMatch() {
+  _matchMinimized = true;
+  var container = document.getElementById('modal-container');
+  var overlay = document.getElementById('modal-overlay');
+  if (container) container.style.display = 'none';
+  if (overlay) overlay.style.display = 'none';
+  // Créer la barre flottante
+  var existing = document.getElementById('match-floating-bar');
+  if (existing) existing.remove();
+  var scoreFor = document.getElementById('m-score-for')?.value || '0';
+  var scoreAgainst = document.getElementById('m-score-against')?.value || '0';
+  var result = document.getElementById('m-match-result')?.value || '';
+  var resultColor = result === 'V' ? 'var(--green)' : result === 'D' ? 'var(--red)' : 'var(--amber)';
+  var bar = document.createElement('div');
+  bar.id = 'match-floating-bar';
+  bar.className = 'match-floating-bar';
+  bar.onclick = restoreMatch;
+  bar.innerHTML = '<i class="ti ti-ball-football" style="color:var(--accent)"></i>' +
+    '<span style="font-size:13px;font-weight:700">Enregistrer un match</span>' +
+    '<span style="font-size:13px;font-weight:700;color:' + resultColor + '">' + scoreFor + ' – ' + scoreAgainst + '</span>' +
+    '<span style="font-size:11px;color:var(--muted)">Cliquer pour rouvrir</span>' +
+    '<button class="btn-icon" onclick="event.stopPropagation();closeMatchMinimized()" title="Annuler"><i class="ti ti-x"></i></button>';
+  document.body.appendChild(bar);
+}
+
+function restoreMatch() {
+  _matchMinimized = false;
+  var container = document.getElementById('modal-container');
+  var overlay = document.getElementById('modal-overlay');
+  if (container) container.style.display = '';
+  if (overlay) overlay.style.display = '';
+  var bar = document.getElementById('match-floating-bar');
+  if (bar) bar.remove();
+}
+
+function closeMatchMinimized() {
+  _matchMinimized = false;
+  var bar = document.getElementById('match-floating-bar');
+  if (bar) bar.remove();
+  closeModal();
+}
 
 function toggleMatchFullscreen() {
   _matchIsFullscreen = !_matchIsFullscreen;
