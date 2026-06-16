@@ -559,6 +559,7 @@ const EFB_STATS_ORDER = [
   { key: 'trackingBack',       label: 'Def. Engagement',     group: 'Defending', icon: 'ti-user-check', color: '#c084fc' },
   { key: 'aggression',         label: 'Aggression',          group: 'Defending', icon: 'ti-flame', color: '#c084fc' },
   // Goalkeeping
+  { key: 'gkAwareness',        label: 'GK Awareness',        group: 'Goalkeeping', icon: 'ti-radar', color: '#2dd4bf' },
   { key: 'gkCatching',         label: 'GK Catching',         group: 'Goalkeeping', icon: 'ti-hand-stop', color: '#2dd4bf' },
   { key: 'gkClearing',         label: 'GK Parrying',         group: 'Goalkeeping', icon: 'ti-hand-finger', color: '#2dd4bf' },
   { key: 'gkReflexes',         label: 'GK Reflexes',         group: 'Goalkeeping', icon: 'ti-eye', color: '#2dd4bf' },
