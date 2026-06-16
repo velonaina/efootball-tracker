@@ -60,6 +60,8 @@ async function init() {
 
 async function selectPlayer(playerId) {
   State.selectedPlayerId = playerId;
+  _buildIAResult = null;
+  _buildIALoading = false;
   if (!State.cards[playerId]) {
     State.cards[playerId] = await Cards.getByPlayer(playerId);
   }
@@ -436,8 +438,336 @@ function ftSave() {
   } catch(e) {}
 }
 
+
+// ── Formation IA ──────────────────────────────────────────────────────────────
+var _formationIALoading = false;
+var FT_IA_ANALYSIS_KEY = 'efb_ft_ia_analysis';
+
+function renderFtIAPanel(data) {
+  var raison = data.raison_formation || '';
+  var atouts = data.atouts_cles || '';
+  var instructions = data.instructions_match || '';
+  var formation = data.formation || '';
+  if (!raison && !atouts && !instructions) return null;
+
+  var q = String.fromCharCode(39);
+  var panel = document.createElement('div');
+  panel.id = 'ft-ia-justif-panel';
+  panel.style.cssText = 'background:var(--surface-2);border-radius:10px;padding:12px;margin-top:10px;font-size:12px;border:1px solid var(--border)';
+  panel.innerHTML =
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+      '<span style="font-weight:700;color:var(--primary)">🤖 Analyse IA — Formation ' + formation + '</span>' +
+      '<button onclick="var p=document.getElementById(' + q + 'ft-ia-justif-panel' + q + ');if(p)p.style.display=' + q + 'none' + q + '" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px">✕</button>' +
+    '</div>' +
+    (raison ? '<div style="margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:var(--amber);margin-bottom:3px">📐 POURQUOI CETTE FORMATION</div><div style="color:var(--text-secondary)">' + raison + '</div></div>' : '') +
+    (atouts ? '<div style="margin-bottom:8px"><div style="font-size:10px;font-weight:700;color:var(--green);margin-bottom:3px">⚡ ATOUTS CLÉS</div><div style="color:var(--text-secondary)">' + atouts + '</div></div>' : '') +
+    (instructions ? '<div><div style="font-size:10px;font-weight:700;color:var(--red);margin-bottom:3px">🎯 INSTRUCTIONS POUR GAGNER</div><div style="color:var(--text-secondary)">' + instructions + '</div></div>' : '');
+  return panel;
+}
+
+function loadFtIAPanel() {
+  try {
+    var saved = localStorage.getItem(FT_IA_ANALYSIS_KEY);
+    if (!saved) return;
+    var data = JSON.parse(saved);
+    var pitchCol = document.querySelector('.ft-pitch-col');
+    if (!pitchCol || document.getElementById('ft-ia-justif-panel')) return;
+    var panel = renderFtIAPanel(data);
+    if (panel) {
+      pitchCol.appendChild(panel);
+      addFtIAToggleBtn();
+    }
+  } catch(e) {}
+}
+
+function saveFtFormationAsCustom() {
+  if (!_ftFormation) { showToast('Aucune formation active', 'warning'); return; }
+
+  // Récupérer les slots actuels
+  var slots = buildPitchSlots(_ftFormation);
+  if (!slots) { showToast('Formation invalide', 'error'); return; }
+
+  // Construire les notes depuis l'analyse IA sauvegardée
+  var notes = '';
+  try {
+    var saved = localStorage.getItem(FT_IA_ANALYSIS_KEY);
+    if (saved) {
+      var data = JSON.parse(saved);
+      var parts = [];
+      if (data.raison_formation) parts.push(data.raison_formation);
+      if (data.atouts_cles) parts.push('Atouts: ' + data.atouts_cles);
+      if (data.instructions_match) parts.push('Instructions: ' + data.instructions_match);
+      if (data.date) parts.push('Analyse du ' + data.date);
+      notes = parts.join(' | ');
+    }
+  } catch(e) {}
+
+  // Demander un nom
+  var defaultName = _ftFormation + ' IA';
+  var name = window.prompt('Nom de la formation personnalisée:', defaultName);
+  if (!name || !name.trim()) return;
+  name = name.trim();
+
+  // Sauvegarder avec notes
+  saveCustomFormation(name, slots.map(function(s) { return { left: s.left, top: s.top, label: s.label }; }), notes);
+  loadAllCustomFormations();
+  showToast('Formation "' + name + '" enregistrée avec notes IA !', 'success');
+}
+
+function addFtIAToggleBtn() {
+  if (document.getElementById('btn-ft-ia-panel')) return;
+  var toolbar = document.querySelector('.ft-toolbar');
+  if (!toolbar) return;
+  var toggleBtn = document.createElement('button');
+  toggleBtn.id = 'btn-ft-ia-panel';
+  toggleBtn.className = 'btn-sm btn-ghost';
+  toggleBtn.title = 'Afficher/masquer l analyse IA';
+  toggleBtn.innerHTML = '<i class="ti ti-clipboard-text"></i>';
+  toggleBtn.onclick = function() {
+    var p = document.getElementById('ft-ia-justif-panel');
+    if (p) p.style.display = p.style.display === 'none' ? 'block' : 'none';
+  };
+  toolbar.appendChild(toggleBtn);
+}
+
+async function requestFormationIA() {
+  if (_formationIALoading) return;
+  _formationIALoading = true;
+
+  var btn = document.getElementById('btn-formation-ia');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> IA...'; }
+
+  try {
+    // Squad 23
+    loadSquad23();
+    if (_squad23.length === 0) { showToast('Squad 23 vide — ajoute des joueurs d' + String.fromCharCode(39) + 'abord', 'warning'); return; }
+
+    // Coach actif
+    var activeCoachId = getActiveCoachId();
+    var activeCoach = activeCoachId ? State.coaches.find(function(c){ return c.id === activeCoachId; }) : null;
+
+    // Stats par formation depuis les matchs
+    var matches = filterStatsMatches(State.matches);
+    var formationStats = {};
+    matches.forEach(function(m) {
+      if (!m.formation) return;
+      if (!formationStats[m.formation]) formationStats[m.formation] = { total: 0, wins: 0 };
+      formationStats[m.formation].total++;
+      if (m.result === 'V') formationStats[m.formation].wins++;
+    });
+    var formationStatsStr = Object.entries(formationStats).map(function(e) {
+      return e[0] + ': ' + e[1].total + ' matchs, ' + Math.round(e[1].wins/e[1].total*100) + '% victoires';
+    }).join(', ') || 'Aucune donnée';
+
+    // Formations disponibles
+    var availableFormations = Object.keys(POSITION_LABELS_BY_FORMATION).join(', ');
+
+    // Joueurs du Squad 23 avec position, style et build sélectionné
+    // Dédupliquer par player_id — garder uniquement la première occurrence
+    var seenPlayerIds = {};
+    var squad23Unique = _squad23.filter(function(s) {
+      if (seenPlayerIds[s.player_id]) return false;
+      seenPlayerIds[s.player_id] = true;
+      return true;
+    });
+
+    var squadDetails = squad23Unique.map(function(s, i) {
+      var player = State.players.find(function(p){ return p.id === s.player_id; });
+      var cards = State.cards[s.player_id] || [];
+      var card = cards.find(function(c){ return c.id === s.card_id; }) || cards[0];
+      var pos = card ? (card.efhub_stats.position || '?') : '?';
+      var style = card ? (card.efhub_stats.playingStyle || '?') : '?';
+      var name = player ? player.name : 'Joueur ' + (i+1);
+
+      // Build sélectionné + stats clés développées
+      var buildList = s.card_id ? (State.builds[s.card_id] || []) : [];
+      var build = buildList.find(function(b){ return b.id === s.build_id; }) || buildList[0];
+      var buildInfo = '';
+      if (build && card && card.efhub_stats) {
+        var sliders = build.sliders || {};
+        var statsFinal = Progression.allStatsFinal(card.efhub_stats, sliders);
+        // Stats clés selon position
+        var keyStats = [];
+        if (pos === 'GK') {
+          keyStats = ['gkCatching','gkReflexes','gkReach'];
+        } else if (['CB','LB','RB'].includes(pos)) {
+          keyStats = ['defensiveAwareness','ballWinning','speed'];
+        } else if (['DMF','CMF'].includes(pos)) {
+          keyStats = ['ballWinning','lowPass','stamina'];
+        } else if (['AMF','LMF','RMF'].includes(pos)) {
+          keyStats = ['offensiveAwareness','dribbling','lowPass'];
+        } else if (['LWF','RWF'].includes(pos)) {
+          keyStats = ['speed','dribbling','acceleration'];
+        } else if (['CF','SS'].includes(pos)) {
+          keyStats = ['finishing','speed','offensiveAwareness'];
+        }
+        var statsStr = keyStats.map(function(k){ return k + ':' + (statsFinal[k] || card.efhub_stats[k] || 0); }).join('/');
+        buildInfo = ' | build:"' + build.name + '" stats:' + statsStr;
+      }
+
+      // Win rate du joueur
+      var pMatches = filterStatsMatches(State.matches).filter(function(m){
+        return m.player_stats && m.player_stats.some(function(ps){ return ps.player_id === s.player_id; });
+      });
+      var pWinRate = pMatches.length > 0 ? Math.round(pMatches.filter(function(m){return m.result==='V';}).length/pMatches.length*100) : 0;
+
+      return (i+1) + '. ' + name + ' [' + pos + '] style:' + style + ' winRate:' + pWinRate + '%' + buildInfo;
+    }).join('\n');
+
+    // Remplacer _squad23 par squad23Unique pour l'assignation
+    var squadForIA = squad23Unique;
+
+    // Positions disponibles selon formations
+    var positionsParFormation = Object.entries(POSITION_LABELS_BY_FORMATION).map(function(e) {
+      return e[0] + ': ' + e[1].join(', ');
+    }).join('\n');
+
+    var nl = '\n';
+    var prompt = 'Tu es un expert eFootball Mobile. Analyse ce squad et propose la formation + composition optimale en te basant PRINCIPALEMENT sur les builds actuels des joueurs et leurs stats développées.' + nl + nl +
+      (activeCoach ? 'COACH ACTIF: ' + activeCoach.name + ' · Style: ' + (activeCoach.style||'—') + ' · Formation préférée: ' + (activeCoach.formation||'—') + nl + nl : '') +
+      'HISTORIQUE PAR FORMATION (indicatif seulement — ne pas se limiter aux formations déjà utilisées): ' + formationStatsStr + nl + nl +
+      'SQUAD 23 avec builds et stats développées (' + squad23Unique.length + ' joueurs):' + nl + squadDetails + nl + nl +
+      'PRIORITÉ DE DÉCISION: 1) Stats développées des builds → 2) Style de jeu du coach → 3) Position naturelle → 4) Historique victoires' + nl + nl +
+      'FORMATIONS DISPONIBLES (liste exhaustive — tu NE PEUX PAS utiliser une autre formation):' + nl + availableFormations + nl + nl +
+      'POSITIONS PAR FORMATION:' + nl + positionsParFormation + nl + nl +
+      'RÈGLES ABSOLUES:' + nl +
+      '- La formation DOIT être exactement l' + String.fromCharCode(39) + 'une de celles listées ci-dessus, mot pour mot. Pas de variante, pas d' + String.fromCharCode(39) + 'invention.' + nl +
+      '- Slot 0 = toujours GK' + nl +
+      '- Assigne chaque joueur à un slot en respectant sa position naturelle' + nl +
+      '- Priorise les joueurs dont la position correspond au slot' + nl +
+      '- Adapte la formation au style du coach (ex: Quick Counter → formation compacte avec vitesse)' + nl +
+      '- Utilise exactement 11 joueurs titulaires (slots 0 à 10)' + nl +
+      '- VÉRIFIE que ta formation est dans la liste avant de répondre' + nl + nl +
+      'Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ou après:' + nl +
+      '{' + nl +
+      '  "formation": "4-3-3",' + nl +
+      '  "titulaires": [' + nl +
+      '    {"slot_idx": 0, "player_name": "Nom du joueur"},' + nl +
+      '    {"slot_idx": 1, "player_name": "Nom"}' + nl +
+      '  ],' + nl +
+      '  "raison_formation": "Pourquoi cette formation est optimale pour ces builds et ce coach (2-3 phrases)",' + nl +
+      '  "atouts_cles": "Les 2-3 forces principales de cette composition (stats développées, synergies)",' + nl +
+      '  "instructions_match": "Instructions tactiques concrètes pour gagner : comment attaquer, défendre, exploiter les faiblesses adverses (3-4 phrases)"' + nl +
+      '}' + nl + nl +
+      'IMPORTANT:' + nl +
+      '- Utilise exactement les noms des joueurs tels qu' + String.fromCharCode(39) + 'ils apparaissent dans le Squad 23.' + nl +
+      '- NE PAS inclure position_label — les positions sont déduites automatiquement depuis la formation.' + nl +
+      '- slot_idx va de 0 à 10, chaque slot correspond à une position fixe définie dans POSITIONS PAR FORMATION.' + nl +
+      '- Les instructions_match doivent être précises et actionnables, pas génériques.';
+
+    var response = await fetch(EFB_CONFIG.supabaseUrl + '/functions/v1/coaching', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + EFB_CONFIG.supabaseKey,
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1800,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    var data = await response.json();
+    var text = (data.content || []).map(function(b){ return b.text||''; }).join('');
+
+    // Parser JSON
+    var jsonStart = text.indexOf('{');
+    var depth = 0, jsonEnd = -1;
+    for (var ci = jsonStart; ci < text.length; ci++) {
+      if (text[ci] === '{') depth++;
+      else if (text[ci] === '}') { depth--; if (depth === 0) { jsonEnd = ci; break; } }
+    }
+    var parsed = JSON.parse(text.slice(jsonStart, jsonEnd + 1));
+
+    // Valider que la formation est dans la liste autorisée
+    var formation = parsed.formation ? parsed.formation.trim() : '';
+    if (!POSITION_LABELS_BY_FORMATION[formation]) {
+      // Chercher la plus proche dans la liste
+      var available = Object.keys(POSITION_LABELS_BY_FORMATION);
+      var fallback = available.find(function(f) { return f.startsWith(formation.split('-')[0]); }) || '4-3-3';
+      showToast('Formation "' + formation + '" non reconnue → utilisation de ' + fallback, 'warning', 4000);
+      formation = fallback;
+    }
+    var slots = buildPitchSlots(formation);
+    if (!slots || slots.length !== 11) throw new Error('Formation invalide : ' + formation);
+
+    // Mettre à jour _ftFormation
+    _ftFormation = formation;
+    var ftInput = document.getElementById('ft-formation-input');
+    if (ftInput) ftInput.value = formation;
+
+    // Réinitialiser titulaires
+    _ftTitulaires = Array(11).fill(null).map(function(_, i){ return { slot_idx: i, player_id: null }; });
+
+    // Labels officiels depuis POSITION_LABELS_BY_FORMATION — pas depuis Claude
+    var officialLabels = POSITION_LABELS_BY_FORMATION[formation] || [];
+
+    // Assigner chaque joueur suggéré — depuis squadForIA (dédupliqué)
+    var usedPlayerIds = {};
+    (parsed.titulaires || []).forEach(function(t) {
+      var sq = squadForIA.find(function(s) {
+        if (usedPlayerIds[s.player_id]) return false; // éviter doublons
+        var p = State.players.find(function(pl){ return pl.id === s.player_id; });
+        return p && p.name === t.player_name;
+      });
+      if (sq) usedPlayerIds[sq.player_id] = true;
+      if (sq && t.slot_idx >= 0 && t.slot_idx < 11) {
+        _ftTitulaires[t.slot_idx] = {
+          slot_idx: t.slot_idx,
+          player_id: sq.player_id,
+          card_id: sq.card_id,
+          build_id: sq.build_id,
+          position_label: officialLabels[t.slot_idx] || '?' // toujours depuis la liste officielle
+        };
+      }
+    });
+
+    // Remplir les remplaçants avec les joueurs du Squad non titulaires
+    var tituPlayerIds = _ftTitulaires.filter(function(t){ return t && t.player_id; }).map(function(t){ return t.player_id; });
+    _ftRemplacants = squadForIA.filter(function(s){
+      return s.player_id && !tituPlayerIds.includes(s.player_id);
+    }).map(function(s){
+      return { player_id: s.player_id, card_id: s.card_id, build_id: s.build_id };
+    });
+
+    // Sauvegarder et re-render
+    ftSave();
+    render();
+
+    // Afficher justification
+    // Sauvegarder l'analyse dans localStorage
+    var analysisData = {
+      formation: parsed.formation,
+      raison_formation: parsed.raison_formation || '',
+      atouts_cles: parsed.atouts_cles || '',
+      instructions_match: parsed.instructions_match || '',
+      date: new Date().toLocaleDateString('fr-FR')
+    };
+    try { localStorage.setItem(FT_IA_ANALYSIS_KEY, JSON.stringify(analysisData)); } catch(e) {}
+
+    // Afficher le panel
+    var pitchCol = document.querySelector('.ft-pitch-col');
+    var existing2 = document.getElementById('ft-ia-justif-panel');
+    if (existing2) existing2.remove();
+    var panel = renderFtIAPanel(analysisData);
+    if (panel && pitchCol) {
+      pitchCol.appendChild(panel);
+      addFtIAToggleBtn();
+    }
+
+  } catch(e) {
+    showToast('Erreur IA : ' + e.message, 'error');
+  }
+
+  _formationIALoading = false;
+  var btn2 = document.getElementById('btn-formation-ia');
+  if (btn2) { btn2.disabled = false; btn2.innerHTML = '<i class="ti ti-wand"></i> IA'; }
+}
+
 function renderFormationTab() {
   ftLoad();
+  setTimeout(loadFtIAPanel, 100);
   var q = String.fromCharCode(39);
   var slots = _ftFormation ? buildPitchSlots(_ftFormation) : null;
   var hasPitch = !!(slots && slots.length === 11);
@@ -451,6 +781,8 @@ function renderFormationTab() {
   html += '<div style="display:flex;gap:6px;align-items:center;flex:1">';
   html += '<input type="text" id="ft-formation-input" class="form-input form-input-sm" style="width:90px" placeholder="4-3-3" value="' + _ftFormation + '" oninput="ftOnFormationInput(this.value)">';
   html += '<button class="btn-sm btn-ghost" onclick="ftOpenPicker()" title="Choisir"><i class="ti ti-ball-football"></i></button>';
+  html += '<button class="btn-sm btn-ghost" onclick="requestFormationIA()" title="Suggérer avec l' + String.fromCharCode(39) + 'IA" id="btn-formation-ia"><i class="ti ti-wand"></i> IA</button>';
+  html += '<button class="btn-sm btn-ghost" onclick="saveFtFormationAsCustom()" title="Enregistrer comme formation personnalisée"><i class="ti ti-device-floppy"></i></button>';
   html += '</div>';
   html += '<div style="display:flex;gap:4px">';
   html += '<button class="btn-sm ' + (_ftMode === 'terrain' ? 'btn-primary' : 'btn-ghost') + '" onclick="ftSetMode(' + q + 'terrain' + q + ')"><i class="ti ti-layout-soccer-field"></i> Terrain</button>';
@@ -526,12 +858,22 @@ function renderFtPitchSVG(slots) {
     var halo = swapMode && hasPlayer ? '<circle cx=\"' + cx + '\" cy=\"' + cy + '\" r=\"18\" fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"1\" stroke-dasharray=\"3,2\" opacity=\"0.5\"/>' : '';
     var posLabel = titu.position_label || slot.label;
 
+    // Tooltip build au survol
+    var tooltipBuildName = '';
+    if (titu.build_id && titu.card_id) {
+      var ttBuilds = State.builds[titu.card_id] || [];
+      var ttBuild = ttBuilds.find(function(b){ return b.id === titu.build_id; });
+      if (ttBuild) tooltipBuildName = ttBuild.name;
+    }
+    var titleTag = player ? ('<title>' + player.name + (tooltipBuildName ? ' — ' + tooltipBuildName : '') + '</title>') : '';
     return '<g class=\"ft-draggable-node\" data-slot=\"' + i + '\" onclick=\"ftSelectSlot(' + i + ')\" style=\"cursor:grab\">' +
+      titleTag +
       halo +
       '<circle cx=\"' + cx + '\" cy=\"' + cy + '\" r=\"15\" fill=\"' + fill + '\" stroke=\"' + stroke + '\" stroke-width=\"' + strokeW + '\"/>' +
       (isSelected ? '<circle cx=\"' + cx + '\" cy=\"' + cy + '\" r=\"19\" fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"1.5\" opacity=\"0.6\"/>' : '') +
       '<text x=\"' + cx + '\" y=\"' + (cy+3) + '\" text-anchor=\"middle\" font-size=\"8\" font-weight=\"700\" fill=\"#fff\">' + posLabel + '</text>' +
       '<text x=\"' + cx + '\" y=\"' + (cy+24) + '\" text-anchor=\"middle\" font-size=\"7.5\" fill=\"' + (isSelected ? '#f59e0b' : '#e2e8f0') + '\" font-weight=\"' + (isSelected ? '700' : '500') + '\">' + name + '</text>' +
+
     '</g>';
   }).join('');
 
@@ -557,10 +899,20 @@ function renderFtListeView() {
     var posLabel = slots && slots[i] ? slots[i].label : (i + 1);
     var player = titu && titu.player_id ? State.players.find(function(p) { return p.id === titu.player_id; }) : null;
     var isSelected = _ftSelectedSlot === i;
+    // Build du titulaire
+    var tituBuildName = '';
+    if (titu && titu.build_id && titu.card_id) {
+      var tituBuilds2 = State.builds[titu.card_id] || [];
+      var tituBuild2 = tituBuilds2.find(function(b){ return b.id === titu.build_id; });
+      if (tituBuild2) tituBuildName = tituBuild2.name;
+    }
     html += '<div class="ft-liste-row' + (isSelected ? ' selected' : '') + '" onclick="ftSelectSlot(' + i + ')">' +
       '<span class="ft-liste-pos">' + posLabel + '</span>' +
       (player
-        ? '<span class="ft-liste-name">' + player.name + '</span>' +
+        ? '<div style="flex:1;min-width:0">' +
+            '<span class="ft-liste-name">' + player.name + '</span>' +
+            (tituBuildName ? '<div style="font-size:10px;color:var(--primary);opacity:0.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + tituBuildName + '</div>' : '') +
+          '</div>' +
           '<button class="btn-icon-xs" onclick="ftRemoveFromSlot(event,' + i + ')"><i class="ti ti-x"></i></button>'
         : '<span class="ft-liste-empty">— vide —</span>') +
     '</div>';
@@ -571,9 +923,19 @@ function renderFtListeView() {
   html += '<div class="ft-liste-title">Remplaçants (' + _ftRemplacants.length + '/12)</div>';
   _ftRemplacants.forEach(function(remp, i) {
     var player = State.players.find(function(p) { return p.id === remp.player_id; });
+    // Build du remplaçant
+    var rempBuildName = '';
+    if (remp.build_id && remp.card_id) {
+      var rempBuilds = State.builds[remp.card_id] || [];
+      var rempBuild = rempBuilds.find(function(b){ return b.id === remp.build_id; });
+      if (rempBuild) rempBuildName = rempBuild.name;
+    }
     html += '<div class="ft-liste-row">' +
       '<span class="ft-liste-pos" style="color:var(--muted)">' + (i+1) + '</span>' +
-      '<span class="ft-liste-name">' + (player ? player.name : '?') + '</span>' +
+      '<div style="flex:1;min-width:0">' +
+        '<span class="ft-liste-name">' + (player ? player.name : '?') + '</span>' +
+        (rempBuildName ? '<div style="font-size:10px;color:var(--primary);opacity:0.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + rempBuildName + '</div>' : '') +
+      '</div>' +
       '<button class="btn-icon-xs" onclick="ftRemoveRemplacant(event,' + i + ')"><i class="ti ti-x"></i></button>' +
     '</div>';
   });
@@ -1309,9 +1671,10 @@ function renderPlayerDetail(player) {
       ${cards.length > 1 ? renderCardSelector(cards) : ''}
       ${renderPlayerTabs()}
       <div class="player-tab-content">
-        ${State.activePlayerTab === 'stats'  ? renderStatsTab(card) : ''}
-        ${State.activePlayerTab === 'builds' ? renderBuildsTab(card) : ''}
-        ${State.activePlayerTab === 'matchs' ? renderPlayerMatchsTab(player) : ''}
+        ${State.activePlayerTab === 'stats'    ? renderStatsTab(card) : ''}
+        ${State.activePlayerTab === 'builds'   ? renderBuildsTab(card) : ''}
+        ${State.activePlayerTab === 'matchs'   ? renderPlayerMatchsTab(player) : ''}
+        ${State.activePlayerTab === 'build-ia' ? renderBuildIA(player, card) : ''}
       </div>
     </div>
   `;
@@ -1379,11 +1742,674 @@ function renderEffectifFooter() {
   return '<div id="squad23-container">' + renderSquad23Section() + '</div>';
 }
 
+// ── Build IA ──────────────────────────────────────────────────────────────────
+var _buildIAResult = null;
+var _buildIALoading = false;
+var _buildIAChatHistory = []; // [{role:'user'|'assistant', content:'...'}]
+var _buildIAChatContext = null; // contexte système du joueur
+var _buildIAChatLoading = false;
+var _buildIAChatPlayerId = null;
+var _buildIAChatCardId = null;
+
+function renderBuildIA(player, card) {
+  if (!card || !card.efhub_stats || Object.keys(card.efhub_stats).length === 0) {
+    return '<div class="empty-state"><p>Aucune stat importée pour ce joueur.</p></div>';
+  }
+
+  var pos = card.efhub_stats.position || '—';
+  var levelCap = card.level_cap || '—';
+  var matches = filterStatsMatches(State.matches);
+  var playerMatches = matches.filter(function(m) {
+    return m.player_stats && m.player_stats.some(function(ps) { return ps.player_id === player.id; });
+  });
+  var winRate = playerMatches.length > 0
+    ? Math.round(playerMatches.filter(function(m) { return m.result === 'V'; }).length / playerMatches.length * 100)
+    : 0;
+
+  var resultHtml = '';
+  if (_buildIALoading) {
+    resultHtml = '<div class="coaching-loading"><i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Analyse en cours...</div>';
+  } else if (_buildIAResult && _buildIAResult.error) {
+    resultHtml = '<div style="color:var(--red);font-size:13px;padding:12px">' + _buildIAResult.error + '</div>';
+  } else if (_buildIAResult && _buildIAResult.data) {
+    resultHtml = renderBuildIAResult(_buildIAResult.data, player, card);
+  }
+
+  var q = String.fromCharCode(39);
+
+  // Chat section
+  var chatHtml = _buildIAChatHistory.map(function(msg) {
+    return chatMessageBubble(msg.role, msg.content);
+  }).join('');
+
+  return [
+    '<div class="build-ia-tab" style="padding:12px">',
+    // Header info joueur
+    '  <div style="background:var(--surface-2);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--text-secondary)">',
+    '    <div style="display:flex;justify-content:space-between;margin-bottom:4px">',
+    '      <span><b style="color:var(--text)">' + player.name + '</b> · ' + pos + ' · Level cap ' + levelCap + '</span>',
+    '      <span>' + playerMatches.length + ' matchs · ' + winRate + '% victoires</span>',
+    '    </div>',
+    '    <div style="color:var(--amber);font-size:11px">🎯 Objectif : atteindre 70% de victoires</div>',
+    '  </div>',
+    // Bouton suggestion
+    '  <button class="btn-primary" style="width:100%;margin-bottom:12px" onclick="requestBuildIA(' + q + player.id + q + ',' + q + card.id + q + ')" ' + (_buildIALoading ? 'disabled' : '') + '>',
+    '    <i class="ti ti-wand"></i> ' + (_buildIAResult ? 'Nouvelle suggestion' : 'Suggérer un build optimal'),
+    '  </button>',
+    // Résultat build visuel
+    '  <div id="build-ia-result">' + resultHtml + '</div>',
+    // Séparateur chat
+    '  <div style="border-top:1px solid var(--border);margin:12px 0"></div>',
+    '  <div style="font-size:11px;font-weight:700;color:var(--primary);margin-bottom:8px">💬 Discussion avec Claude</div>',
+    // Messages
+    '  <div id="build-ia-chat-messages" style="max-height:300px;overflow-y:auto;margin-bottom:8px;display:flex;flex-direction:column">' + chatHtml + '</div>',
+    // Input
+    '  <div style="display:flex;gap:6px">',
+    '    <input id="build-ia-chat-input" class="form-input form-input-sm" style="flex:1" placeholder="Ex: booste la vitesse, adapte pour Quick Counter..." onkeydown="if(event.key===String.fromCharCode(13))sendBuildIAChat(' + q + player.id + q + ',' + q + card.id + q + ')">',
+    '    <button class="btn-sm btn-primary" onclick="sendBuildIAChat(' + q + player.id + q + ',' + q + card.id + q + ')" id="btn-build-ia-send" ' + (_buildIAChatLoading ? 'disabled' : '') + '>',
+    '      <i class="ti ti-send"></i>',
+    '    </button>',
+    '    <button class="btn-sm btn-ghost" onclick="clearBuildIAChat()" title="Effacer la conversation">',
+    '      <i class="ti ti-trash"></i>',
+    '    </button>',
+    '  </div>',
+    '</div>',
+  ].join('');
+}
+
+function renderBuildIAResult(data, player, card) {
+  var sliders = data.sliders || {};
+  var activeSliders = SLIDERS_CONFIG.filter(function(s) { return (sliders[s.key] || 0) > 0; });
+  var pointsUsed = Object.entries(sliders).reduce(function(sum, entry) {
+    return sum + Progression.clickCost(entry[1]);
+  }, 0);
+  var pointsMax = card.points_max || Progression.pointsFromLevelCap(card.level_cap || 0);
+
+  // Calcul stats finales avec le build suggéré
+  var statsFinal = Progression.allStatsFinal(card.efhub_stats, sliders);
+  var efhubId = player ? Efhub.parseId(player.efhub_url || '') : null;
+  var imgUrl = efhubId ? Efhub.imgUrl(efhubId) : null;
+  var pos = card.efhub_stats.position || '';
+
+  // Grouper les stats pour l'affichage détaillé
+  var groups = {};
+  EFB_STATS_ORDER.forEach(function(s) {
+    if (!groups[s.group]) groups[s.group] = [];
+    groups[s.group].push(s);
+  });
+
+  var html = '';
+
+  // ── Carte visuelle style build card ──
+  html += '<div class="build-card active" style="margin-bottom:12px;cursor:default">';
+  html += '  <div class="build-card-header">';
+  html += '    <div class="build-card-left">';
+  html += '      <span class="build-name">🤖 Build suggéré par IA' + (data._budgetCorrige ? ' <span style="font-size:10px;color:var(--amber)">⚠ budget ajusté</span>' : '') + '</span>';
+  html += '      <span class="build-pts ' + (pointsUsed === pointsMax ? 'full' : '') + '">' + pointsUsed + ' / ' + pointsMax + ' pts</span>';
+  html += '    </div>';
+  html += '  </div>';
+
+  // Photo + position + icônes sliders
+  html += '  <div class="build-efhub-preview">';
+  html += '    <div class="build-efhub-left">';
+  if (imgUrl) html += '      <img src="' + imgUrl + '" class="build-player-img" alt="' + player.name + '">';
+  html += '      <div class="build-player-meta">';
+  html += '        <span class="build-player-name">' + player.name.toUpperCase() + '</span>';
+  if (pos) html += '        <span class="build-player-pos">' + pos + '</span>';
+  html += '      </div>';
+  html += '    </div>';
+  html += '    <div class="build-icons-row">';
+  activeSliders.forEach(function(s) {
+    html += '      <div class="build-slider-icon-wrap">';
+    html += '        <div class="build-slider-svg" style="display:flex;align-items:center;justify-content:center;color:#e2e8f0">' + s.icon + '</div>';
+    html += '        <span class="build-slider-count">' + sliders[s.key] + '</span>';
+    html += '      </div>';
+  });
+  if (activeSliders.length === 0) html += '<span class="build-empty-sliders">Aucun clic</span>';
+  html += '    </div>';
+  html += '  </div>';
+  html += '</div>';
+
+  // ── Stats finales détaillées ──
+  html += '<div class="build-details" style="margin-bottom:12px">';
+  html += '  <div class="build-details-section">';
+  html += '    <div class="build-details-title">Stats après développement</div>';
+  Object.entries(groups).forEach(function(entry) {
+    var group = entry[0];
+    var stats = entry[1];
+    var hasChanges = stats.some(function(s) { return (statsFinal[s.key] || 0) > (card.efhub_stats[s.key] || 0); });
+    // Pour GK : afficher Goalkeeping, sinon masquer ; pour non-GK masquer Goalkeeping
+    if (group === 'Goalkeeping' && pos !== 'GK') return;
+    html += '    <div class="build-detail-group">';
+    html += '      <div class="build-detail-group-label">' + group + (hasChanges ? ' ✨' : '') + '</div>';
+    html += '      <div class="build-detail-stats">';
+    stats.forEach(function(s) {
+      var base = card.efhub_stats[s.key] || 0;
+      var final = statsFinal[s.key] || base;
+      var delta = final - base;
+      html += '        <div class="build-detail-stat">';
+      html += '          <span class="build-detail-label">' + s.label + '</span>';
+      html += '          <div class="build-detail-bar-wrap">';
+      html += '            <div class="build-detail-bar-base" style="width:' + base + '%;background:' + s.color + '55"></div>';
+      if (delta > 0) html += '            <div class="build-detail-bar-delta" style="width:' + delta + '%;background:' + s.color + '"></div>';
+      html += '          </div>';
+      html += '          <span class="build-detail-val">' + final + '</span>';
+      html += '          ' + (delta > 0 ? '<span class="build-detail-delta">+' + delta + '</span>' : '<span class="build-detail-delta"></span>');
+      html += '        </div>';
+    });
+    html += '      </div>';
+    html += '    </div>';
+  });
+  html += '  </div>';
+  html += '</div>';
+
+  // ── Diagnostic & Conseils ──
+  if (data.diagnostic) {
+    html += '<div style="background:var(--surface-2);border-radius:10px;padding:10px 12px;margin-bottom:10px">';
+    html += '  <div style="font-size:11px;font-weight:700;color:var(--amber);margin-bottom:6px">📊 DIAGNOSTIC</div>';
+    html += '  <div style="font-size:12px;color:var(--text-secondary)">' + data.diagnostic + '</div>';
+    html += '</div>';
+  }
+  if (data.conseils) {
+    html += '<div style="background:var(--surface-2);border-radius:10px;padding:10px 12px;margin-bottom:10px">';
+    html += '  <div style="font-size:11px;font-weight:700;color:var(--primary);margin-bottom:6px">💡 CONSEILS TACTIQUES</div>';
+    html += '  <div style="font-size:12px;color:var(--text-secondary)">' + data.conseils + '</div>';
+    html += '</div>';
+  }
+
+  // ── Bouton enregistrer ──
+  var q = String.fromCharCode(39);
+  var cardIdSafe = card ? card.id : '';
+  html += '<div id="build-ia-save-section" style="margin-top:12px">';
+  html += '  <div id="build-ia-save-form" style="display:none;background:var(--surface-2);border-radius:10px;padding:10px 12px;margin-bottom:8px">';
+  html += '    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:6px">Nom du build</div>';
+  html += '    <input id="build-ia-name-input" class="form-input form-input-sm" style="width:100%;margin-bottom:8px" value="Build IA — ' + new Date().toLocaleDateString('fr-FR') + '">';
+  html += '    <div style="display:flex;gap:6px">';
+  html += '      <button class="btn-sm btn-primary" style="flex:1" onclick="saveBuildFromIA(' + q + cardIdSafe + q + ')"><i class="ti ti-check"></i> Confirmer</button>';
+  html += '      <button class="btn-sm btn-ghost" onclick="document.getElementById(' + q + 'build-ia-save-form' + q + ').style.display=' + q + 'none' + q + ';document.getElementById(' + q + 'build-ia-save-btn' + q + ').style.display=' + q + '' + q + '">Annuler</button>';
+  html += '    </div>';
+  html += '  </div>';
+  html += '  <button id="build-ia-save-btn" class="btn-sm btn-ghost" style="width:100%" onclick="document.getElementById(' + q + 'build-ia-save-form' + q + ').style.display=' + q + 'block' + q + ';this.style.display=' + q + 'none' + q + '">';
+  html += '    <i class="ti ti-bookmark-plus"></i> Enregistrer ce build';
+  html += '  </button>';
+  html += '</div>';
+
+  return html;
+}
+
+async function saveBuildFromIA(cardId) {
+  var name = document.getElementById('build-ia-name-input') ? document.getElementById('build-ia-name-input').value.trim() : '';
+  if (!name) { showToast('Entre un nom pour le build', 'warning'); return; }
+  if (!_buildIAResult || !_buildIAResult.data || !_buildIAResult.data.sliders) {
+    showToast('Aucun build suggéré à enregistrer', 'error'); return;
+  }
+  var sliders = _buildIAResult.data.sliders;
+  var pointsUsed = Object.entries(sliders).reduce(function(sum, e) {
+    return sum + Progression.clickCost(e[1]);
+  }, 0);
+  try {
+    var build = await Builds.create({ card_id: cardId, name: name, sliders: sliders, points_used: pointsUsed });
+    // Trouver le player_id depuis la card
+    var playerId = null;
+    Object.entries(State.cards).forEach(function(entry) {
+      if (entry[1].some(function(c) { return c.id === cardId; })) playerId = entry[0];
+    });
+    if (playerId) State.builds[cardId] = await Builds.getByCard(cardId);
+    showToast('Build "' + name + '" enregistré !', 'success');
+    // Masquer le form, afficher confirmation
+    var saveSection = document.getElementById('build-ia-save-section');
+    if (saveSection) {
+      saveSection.innerHTML = '<div style="font-size:12px;color:var(--green);padding:8px 0"><i class="ti ti-check"></i> Build enregistré — visible dans l' + String.fromCharCode(39) + 'onglet Builds</div>';
+    }
+  } catch(e) { showToast('Erreur : ' + e.message, 'error'); }
+}
+
+
+function getBuildPriorityRules(pos, playingStyle, coachStyle) {
+  var nl = '\n';
+  var rules = '';
+
+  // ── Règles par position ──
+  var byPos = {
+    'CF': 'Finisseur pur : Shooting (finishing/curl/setPieceTaking) > LowerBody (speed/kickingPower) > Dexterity (acceleration) > Aerial (heading). Evite Passing et Defending.',
+    'SS': 'Attaquant second couteau : Shooting > Dribbling (ballControl/dribbling) > Dexterity > LowerBody. Peut avoir Passing si style créateur.',
+    'LWF': 'Ailier gauche : LowerBody (speed/stamina) > Dribbling > Dexterity (acceleration/balance) > Shooting. Priorise la vitesse et le dribble.',
+    'RWF': 'Ailier droit : LowerBody (speed/stamina) > Dribbling > Dexterity (acceleration/balance) > Shooting. Priorise la vitesse et le dribble.',
+    'AMF': 'Meneur de jeu : Dribbling (ballControl/dribbling/tightPossession) > Dexterity (offensiveAwareness/acceleration/balance) > Passing (lowPass/loftedPass) > LowerBody. Evite Shooting et Defending sauf si rôle buteur.',
+    'CMF': 'Milieu central : Passing > Dexterity > Dribbling > LowerBody (stamina). Equilibre entre création et physique.',
+    'DMF': 'Milieu défensif : Defending (defensiveAwareness/ballWinning/trackingBack) > LowerBody (stamina) > Passing > Dexterity. Priorise la récupération.',
+    'LMF': 'Milieu gauche : LowerBody (speed) > Passing > Dribbling > Dexterity. Polyvalence et dynamisme.',
+    'RMF': 'Milieu droit : LowerBody (speed) > Passing > Dribbling > Dexterity. Polyvalence et dynamisme.',
+    'CB': 'Défenseur central : Defending (defensiveAwareness/ballWinning/aggression) > Aerial (heading/jump/physicalContact) > LowerBody (speed). Evite Shooting et Passing.',
+    'LB': 'Latéral gauche : Defending > LowerBody (speed/stamina) > Dexterity (acceleration). Si latéral offensif : ajoute Passing.',
+    'RB': 'Latéral droit : Defending > LowerBody (speed/stamina) > Dexterity (acceleration). Si latéral offensif : ajoute Passing.',
+    'GK': 'Gardien : GK3 (gkCatching/gkReflexes) > GK2 (gkClearing/gkReach) > GK1 (gkAwareness/jump). Ne jamais utiliser Shooting/Passing/Dribbling.',
+  };
+  rules += 'PRIORITÉ SLIDERS PAR POSITION (' + pos + '):' + nl;
+  rules += (byPos[pos] || 'Position non reconnue — priorise les stats offensives.') + nl + nl;
+
+  // ── Règles par style de jeu (playing style efhub) ──
+  var byStyle = {
+    'Hole Player':        'Hole Player : maximise offensiveAwareness (Dexterity) + ballControl/dribbling (Dribbling) + finishing (Shooting). Il doit être décisif dans la surface.',
+    'Prolific Winger':    'Prolific Winger : maximise speed (LowerBody) + acceleration (Dexterity) + dribbling (Dribbling). Il doit déborder et centrer vite.',
+    'Goal Poacher':       'Goal Poacher : maximise finishing/curl (Shooting) + speed (LowerBody) + acceleration (Dexterity). Il vit dans la surface.',
+    'Fox in the Box':     'Fox in the Box : maximise finishing (Shooting) + heading/jump (Aerial) + physicalContact (Aerial). Présence dans la surface.',
+    'Classic No. 10':     'Classic No. 10 : maximise lowPass/loftedPass (Passing) + ballControl (Dribbling) + offensiveAwareness (Dexterity). Créateur de jeu.',
+    'Creative Playmaker': 'Creative Playmaker : maximise Passing + Dexterity + Dribbling. Vision et technique avant tout.',
+    'Orchestrator':       'Orchestrator : maximise Passing (lowPass/loftedPass) + Dexterity + LowerBody (stamina). Moteur du milieu.',
+    'Box-to-Box':         'Box-to-Box : équilibre LowerBody (stamina/speed) + Passing + Defending. Endurance maximale.',
+    'Anchor Man':         'Anchor Man : maximise Defending + Aerial (physicalContact/heading) + LowerBody (stamina). Défenseur pur.',
+    'Build Up':           'Build Up : maximise Passing + Defending (defensiveAwareness) + LowerBody. Relanceur depuis la défense.',
+    'Destroyer':          'Destroyer : maximise Defending (ballWinning/aggression) + Aerial + LowerBody. Récupérateur agressif.',
+    'Cross Specialist':   'Cross Specialist : maximise LowerBody (speed) + Passing (loftedPass) + Dexterity (acceleration). Largeur et centres.',
+    'Attacking Full-back':'Attacking Full-back : maximise LowerBody (speed/stamina) + Passing + Dexterity. Montées incessantes.',
+    'Defensive Full-back':'Defensive Full-back : maximise Defending + LowerBody (speed) + Dexterity (acceleration). Sécurité défensive.',
+  };
+  if (playingStyle && byStyle[playingStyle]) {
+    rules += 'STYLE DE JEU (' + playingStyle + '):' + nl + byStyle[playingStyle] + nl + nl;
+  }
+
+  // ── Règles par style de coach ──
+  var byCoach = {
+    'Quick Counter':     'Quick Counter : maximise VITESSE (LowerBody speed/acceleration Dexterity). Les transitions rapides nécessitent des joueurs explosifs. Priorise speed > acceleration > stamina.',
+    'Long Ball Counter': 'Long Ball Counter : maximise Aerial (heading/jump) + LowerBody (speed) + Passing (loftedPass). Jeu direct et duels aériens.',
+    'Possession Game':   'Possession Game : maximise Passing (lowPass) + Dribbling (ballControl/tightPossession) + Dexterity (offensiveAwareness). Technique et conservation.',
+    'Out Wide':          'Out Wide : maximise LowerBody (speed) + Passing (loftedPass) + Dribbling. Largeur du terrain et centres.',
+    'Long Ball':         'Long Ball : maximise Aerial (heading/jump/physicalContact) + LowerBody (kickingPower) + Passing (loftedPass). Jeu aérien et physique.',
+  };
+  if (coachStyle && byCoach[coachStyle]) {
+    rules += 'STYLE DU COACH (' + coachStyle + '):' + nl + byCoach[coachStyle] + nl + nl;
+  }
+
+  // ── Règle générale de distribution ──
+  rules += 'RÈGLE DE DISTRIBUTION:' + nl +
+    '1. Identifie les 2-3 sliders prioritaires selon position + style de jeu + coach.' + nl +
+    '2. Investis 60-70% du budget sur ces sliders prioritaires.' + nl +
+    '3. Répartis les 30-40% restants sur les sliders secondaires utiles.' + nl +
+    '4. Evite de mettre trop de clics sur UN SEUL slider — diversifie.' + nl +
+    '5. Ne booste pas les stats déjà très hautes (>90) — investis là où le gain est le plus impactant.' + nl;
+
+  return rules;
+}
+
+function buildBuildIAChatContext(player, card) {
+  var matches = filterStatsMatches(State.matches);
+  var playerMatches = matches.filter(function(m) {
+    return m.player_stats && m.player_stats.some(function(ps) { return ps.player_id === player.id; });
+  });
+  var goals = 0, assists = 0, ratings = [];
+  playerMatches.forEach(function(m) {
+    var ps = (m.player_stats || []).find(function(p) { return p.player_id === player.id; });
+    if (ps) {
+      goals += ps.goals || 0;
+      assists += ps.assists || 0;
+      if (ps.rating) ratings.push(ps.rating);
+    }
+  });
+  var avgRating = ratings.length > 0 ? (ratings.reduce(function(a,b){return a+b;},0)/ratings.length).toFixed(1) : 'N/A';
+  var winRate = playerMatches.length > 0 ? Math.round(playerMatches.filter(function(m){return m.result==='V';}).length/playerMatches.length*100) : 0;
+  var activeCoachId = getActiveCoachId();
+  var activeCoach = activeCoachId ? State.coaches.find(function(c){return c.id===activeCoachId;}) : null;
+  var pos = card.efhub_stats.position || '';
+  var pointsMax = card.points_max || Progression.pointsFromLevelCap(card.level_cap || 0);
+  var nl = '\n';
+
+  // Sliders disponibles avec coûts
+  var isGK = pos === 'GK';
+  var coutTable = [];
+  for (var ci = 1; ci <= 12; ci++) coutTable.push(ci + ' clics=' + Progression.clickCost(ci) + 'pts');
+  var slidersList = SLIDERS_CONFIG.filter(function(s) {
+    return isGK ? true : !['gk1','gk2','gk3'].includes(s.key);
+  }).map(function(s) {
+    var cur = s.stats.map(function(sk){ return sk+':'+(card.efhub_stats[sk]||0); }).join(', ');
+    return '- ' + s.key + ' (' + s.label + ') actuel: ' + cur;
+  }).join(nl);
+
+  // Build suggéré actuel si disponible
+  var currentBuild = '';
+  if (_buildIAResult && _buildIAResult.data && _buildIAResult.data.sliders) {
+    var sl = _buildIAResult.data.sliders;
+    var totalPts = Object.entries(sl).reduce(function(sum,e){return sum+Progression.clickCost(e[1]);},0);
+    currentBuild = nl + 'BUILD SUGGÉRÉ ACTUEL: ' + JSON.stringify(sl) + ' (' + totalPts + '/' + pointsMax + ' pts)';
+  }
+
+  var priorityRules = getBuildPriorityRules(pos, card.efhub_stats.playingStyle || '', activeCoach ? (activeCoach.style||'') : '');
+
+  var ctx = 'Tu es un expert eFootball Mobile. Tu analyses et discutes du build optimal pour ce joueur.' + nl + nl +
+    'JOUEUR: ' + player.name + ' · ' + pos + ' · Level cap: ' + (card.level_cap||'—') + ' · Style: ' + (card.efhub_stats.playingStyle||'—') + nl +
+    'PERFORMANCE: ' + playerMatches.length + ' matchs · ' + winRate + '% victoires · Note: ' + avgRating + '/10 · ' + goals + ' buts · ' + assists + ' passes' + nl +
+    (activeCoach ? 'COACH: ' + activeCoach.name + ' · ' + (activeCoach.style||'—') + ' · Formation: ' + (activeCoach.formation||'—') + nl : '') +
+    currentBuild + nl + nl +
+    priorityRules +
+    'SLIDERS DISPONIBLES:' + nl + slidersList + nl + nl +
+    'COUT PAR CLICS: ' + coutTable.join(', ') + nl +
+    'BUDGET: ' + pointsMax + ' pts. Utilise exactement 100% du budget.' + nl + nl +
+    'Réponds en français. Si tu proposes un nouveau build, inclus un objet JSON entre balises <build> et </build> avec le format: <build>{"sliders":{"shooting":8}}</build>. ' +
+    'Sinon réponds librement en texte. Sois concis (max 150 mots par réponse).';
+
+  return ctx;
+}
+
+async function sendBuildIAChat(playerId, cardId) {
+  var input = document.getElementById('build-ia-chat-input');
+  var msgContainer = document.getElementById('build-ia-chat-messages');
+  var sendBtn = document.getElementById('btn-build-ia-send');
+  if (!input || !msgContainer) return;
+  var text = input.value.trim();
+  if (!text) return;
+
+  var player = State.players.find(function(p){ return p.id === playerId; });
+  var card = (State.cards[playerId]||[]).find(function(c){ return c.id === cardId; });
+  if (!player || !card) return;
+
+  // Réinitialiser contexte si joueur change
+  if (_buildIAChatPlayerId !== playerId || _buildIAChatCardId !== cardId) {
+    _buildIAChatHistory = [];
+    _buildIAChatContext = null;
+    _buildIAChatPlayerId = playerId;
+    _buildIAChatCardId = cardId;
+  }
+
+  msgContainer.insertAdjacentHTML('beforeend', chatMessageBubble('user', text));
+  input.value = '';
+  input.disabled = true;
+  if (sendBtn) sendBtn.disabled = true;
+  _buildIAChatLoading = true;
+
+  var typingId = 'build-ia-typing-' + Date.now();
+  msgContainer.insertAdjacentHTML('beforeend', '<div id="' + typingId + '" style="font-size:11px;color:var(--muted);padding:4px 8px">Claude réfléchit...</div>');
+  msgContainer.scrollTop = msgContainer.scrollHeight;
+
+  if (!_buildIAChatContext) _buildIAChatContext = buildBuildIAChatContext(player, card);
+
+  // Calculer les points restants et les rappeler automatiquement
+  var pointsMax = card.points_max || Progression.pointsFromLevelCap(card.level_cap || 0);
+  var ptsUsed = 0;
+  if (_buildIAResult && _buildIAResult.data && _buildIAResult.data.sliders) {
+    ptsUsed = Object.entries(_buildIAResult.data.sliders).reduce(function(sum, e) {
+      return sum + Progression.clickCost(e[1]);
+    }, 0);
+  }
+  var ptsRestants = pointsMax - ptsUsed;
+  var budgetNote = ptsRestants > 0
+    ? '[RAPPEL AUTOMATIQUE: il reste ' + ptsRestants + ' pts non utilisés sur ' + pointsMax + ' pts. Redistribue-les intelligemment sur les sliders les plus utiles pour ce joueur et propose un build mis à jour avec <build>{...}</build>.]'
+    : '[Budget utilisé à 100% : ' + ptsUsed + '/' + pointsMax + ' pts]';
+
+  var textAvecBudget = text + '\n\n' + budgetNote;
+  _buildIAChatHistory.push({ role: 'user', content: textAvecBudget });
+
+  var messages = [{ role: 'user', content: _buildIAChatContext + '\n\n---\n' + textAvecBudget }];
+  if (_buildIAChatHistory.length > 1) {
+    messages = [{ role: 'user', content: _buildIAChatContext }]
+      .concat(_buildIAChatHistory.slice(0, -1))
+      .concat([{ role: 'user', content: textAvecBudget }]);
+  }
+
+  try {
+    var response = await fetch(EFB_CONFIG.supabaseUrl + '/functions/v1/coaching', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + EFB_CONFIG.supabaseKey,
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 600,
+        messages: messages
+      })
+    });
+
+    var data = await response.json();
+    var reply = (data.content || []).map(function(b){ return b.text||''; }).join('');
+
+    // Détecter si Claude propose un nouveau build dans <build>...</build>
+    var buildMatch = reply.match(/<build>([\s\S]*?)<\/build>/);
+    if (buildMatch) {
+      try {
+        var jsonStart = buildMatch[1].indexOf('{');
+        var depth = 0, jsonEnd = -1;
+        for (var ci3 = jsonStart; ci3 < buildMatch[1].length; ci3++) {
+          if (buildMatch[1][ci3]==='{') depth++;
+          else if (buildMatch[1][ci3]==='}') { depth--; if(depth===0){jsonEnd=ci3;break;} }
+        }
+        var newBuild = JSON.parse(buildMatch[1].slice(jsonStart, jsonEnd+1));
+        // Valider budget
+        var totalPts = Object.entries(newBuild.sliders||{}).reduce(function(sum,e){return sum+Progression.clickCost(e[1]);},0);
+        var pointsMax = card.points_max || Progression.pointsFromLevelCap(card.level_cap||0);
+        if (totalPts <= pointsMax) {
+          _buildIAResult = { data: newBuild };
+          var elResult = document.getElementById('build-ia-result');
+          if (elResult) elResult.innerHTML = renderBuildIAResult(newBuild, player, card);
+        }
+        // Nettoyer les balises de la réponse affichée
+        reply = reply.replace(/<build>[\s\S]*?<\/build>/, '✅ Build mis à jour ci-dessus.');
+      } catch(e2) {}
+    }
+
+    _buildIAChatHistory.push({ role: 'assistant', content: reply });
+    var typingEl = document.getElementById(typingId);
+    if (typingEl) typingEl.remove();
+    msgContainer.insertAdjacentHTML('beforeend', chatMessageBubble('assistant', reply));
+
+  } catch(e) {
+    var typingEl = document.getElementById(typingId);
+    if (typingEl) typingEl.remove();
+    msgContainer.insertAdjacentHTML('beforeend', chatMessageBubble('assistant', 'Erreur : ' + e.message));
+  }
+
+  _buildIAChatLoading = false;
+  input.disabled = false;
+  if (sendBtn) sendBtn.disabled = false;
+  input.focus();
+  msgContainer.scrollTop = msgContainer.scrollHeight;
+}
+
+function clearBuildIAChat() {
+  _buildIAChatHistory = [];
+  _buildIAChatContext = null;
+  _buildIAChatPlayerId = null;
+  _buildIAChatCardId = null;
+  var el = document.getElementById('build-ia-chat-messages');
+  if (el) el.innerHTML = '';
+}
+
+async function requestBuildIA(playerId, cardId) {
+  if (_buildIALoading) return;
+  _buildIALoading = true;
+  _buildIAResult = null;
+
+  var el = document.getElementById('build-ia-result');
+  if (el) el.innerHTML = '<div class="coaching-loading"><i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Analyse en cours...</div>';
+
+  try {
+    var player = State.players.find(function(p) { return p.id === playerId; });
+    var card = (State.cards[playerId] || []).find(function(c) { return c.id === cardId; });
+    if (!player || !card) throw new Error('Joueur ou carte introuvable.');
+
+    var matches = filterStatsMatches(State.matches);
+    var playerMatches = matches.filter(function(m) {
+      return m.player_stats && m.player_stats.some(function(ps) { return ps.player_id === playerId; });
+    });
+
+    if (playerMatches.length < 3) {
+      _buildIAResult = { error: 'Pas assez de données — ce joueur doit avoir au moins 3 matchs.' };
+      _buildIALoading = false;
+      var elErr = document.getElementById('build-ia-result');
+      if (elErr) elErr.innerHTML = '<div style="color:var(--red);font-size:13px;padding:12px">' + _buildIAResult.error + '</div>';
+      return;
+    }
+
+    // Builds existants avec stats
+    var builds = (State.builds[cardId] || []).map(function(b) {
+      var bMatches = matches.filter(function(m) {
+        return m.player_stats && m.player_stats.some(function(ps) { return ps.build_id === b.id; });
+      });
+      var bWins = bMatches.filter(function(m) { return m.result === 'V'; }).length;
+      var bWinRate = bMatches.length > 0 ? Math.round(bWins / bMatches.length * 100) : 0;
+      return b.name + ' (sliders: ' + JSON.stringify(b.sliders || {}) + ') — ' + bMatches.length + ' matchs, ' + bWinRate + '% victoires';
+    });
+
+    // Stats joueur dans les matchs
+    var goals = 0, assists = 0, ratings = [];
+    playerMatches.forEach(function(m) {
+      var ps = (m.player_stats || []).find(function(p) { return p.player_id === playerId; });
+      if (ps) {
+        goals += ps.goals || 0;
+        assists += ps.assists || 0;
+        if (ps.rating) ratings.push(ps.rating);
+      }
+    });
+    var avgRating = ratings.length > 0 ? (ratings.reduce(function(a, b) { return a + b; }, 0) / ratings.length).toFixed(1) : 'N/A';
+    var winRate = Math.round(playerMatches.filter(function(m) { return m.result === 'V'; }).length / playerMatches.length * 100);
+
+    // Coach actif
+    var activeCoachId = getActiveCoachId();
+    var activeCoach = activeCoachId ? State.coaches.find(function(c) { return c.id === activeCoachId; }) : null;
+
+    // Sliders disponibles pour ce joueur
+    var pos = card.efhub_stats.position || '';
+    var isGK = pos === 'GK';
+
+    // Stats de base
+    var baseStats = card.efhub_stats || {};
+
+    var pointsMax = card.points_max || Progression.pointsFromLevelCap(card.level_cap || 0);
+    var nl = String.fromCharCode(10);
+
+    // Pre-calculer le cout par nombre de clics
+    var coutTable = [];
+    for (var ci = 1; ci <= 12; ci++) {
+      coutTable.push(ci + ' clics=' + Progression.clickCost(ci) + 'pts');
+    }
+
+    // Sliders avec stats actuelles + projection apres clics
+    var sliderDetails = SLIDERS_CONFIG.filter(function(s) {
+      if (isGK) return true;
+      return !['gk1', 'gk2', 'gk3'].includes(s.key);
+    }).map(function(s) {
+      var statsCurrent = s.stats.map(function(sk) {
+        return sk + ':' + (baseStats[sk] || 0);
+      }).join(', ');
+      // Générer toutes les options de clics avec coût exact pré-calculé
+      var options = [2, 4, 6, 8, 10, 12].map(function(n) {
+        var cout = Progression.clickCost(n);
+        var statsAfter = s.stats.map(function(sk) {
+          return sk + ':' + ((baseStats[sk] || 0) + n);
+        }).join(', ');
+        return '  ' + n + ' clics (COUT EXACT: ' + cout + 'pts) -> ' + statsAfter;
+      }).join(nl);
+      return '- ' + s.key + ' (' + s.label + ')' + nl +
+        '  Actuel: ' + statsCurrent + nl + options;
+    });
+
+    var priorityRules2 = getBuildPriorityRules(pos, card.efhub_stats.playingStyle || '', activeCoach ? (activeCoach.style||'') : '');
+
+    var prompt = 'Tu es un expert eFootball Mobile. Analyse ce joueur et propose le build optimal pour atteindre 70% de victoires.' + nl + nl +
+      priorityRules2 + nl +
+      'JOUEUR: ' + player.name + ' · Position: ' + pos + ' · Level cap: ' + (card.level_cap || '—') + ' · Carte: ' + (card.card_type || '—') + nl +
+      'Style de jeu: ' + (card.efhub_stats.playingStyle || '—') + nl + nl +
+      'PERFORMANCE: ' + playerMatches.length + ' matchs · ' + winRate + '% victoires · Note moy: ' + avgRating + '/10 · ' + goals + ' buts · ' + assists + ' passes' + nl + nl +
+      (activeCoach ? 'COACH ACTIF: ' + activeCoach.name + ' · Style: ' + (activeCoach.style || '—') + ' · Formation: ' + (activeCoach.formation || '—') + nl + nl : '') +
+      'BUILDS EXISTANTS:' + nl + (builds.length > 0 ? builds.join(nl) : 'Aucun build') + nl + nl +
+      'SLIDERS DISPONIBLES (stats actuelles + projections):' + nl + sliderDetails.join(nl) + nl + nl +
+      'COUT EN POINTS (reference):' + nl +
+      coutTable.join(', ') + nl + nl +
+      'BUDGET TOTAL: ' + pointsMax + ' pts. OBJECTIF: utiliser exactement 100% du budget — tous les points doivent etre depenses.' + nl +
+      'REGLE ABSOLUE: la somme des couts de tous les sliders choisis NE DOIT PAS depasser ' + pointsMax + ' pts.' + nl +
+      'Si tu as des points restants apres ta premiere selection, ajoute des clics supplementaires sur les sliders les plus utiles.' + nl + nl +
+      'Reponds UNIQUEMENT avec un objet JSON valide, sans texte avant ou apres, sans balises markdown:' + nl +
+      '{' + nl +
+      '  "sliders": { "shooting": 8, "passing": 4 },' + nl +
+      '  "diagnostic": "Explication courte du win rate actuel et ce qui manque (2-3 phrases)",' + nl +
+      '  "conseils": "2-3 conseils tactiques concrets pour ce joueur avec ce coach"' + nl +
+      '}' + nl + nl +
+      'VERIFICATION OBLIGATOIRE avant de repondre:' + nl +
+      '1. Pour chaque slider choisi, lis le COUT EXACT dans la liste ci-dessus (ex: 8 clics = 12pts, pas 8pts).' + nl +
+      '2. Additionne tous ces couts. Le total DOIT etre exactement ' + pointsMax + ' pts.' + nl +
+      '3. Si le total est inferieur a ' + pointsMax + ' pts, ajoute des clics sur les sliders les plus utiles pour ce joueur jusqu\' a atteindre exactement ' + pointsMax + ' pts.';
+
+    var response = await fetch(EFB_CONFIG.supabaseUrl + '/functions/v1/coaching', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + EFB_CONFIG.supabaseKey,
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    var data = await response.json();
+    var text = (data.content || []).map(function(b) { return b.text || ''; }).join('');
+
+    // Parser le JSON retourné par Claude
+    // Extraire le JSON meme si Claude ajoute du texte parasite
+    // Extraire le JSON en trouvant les accolades équilibrées
+    var jsonStart = text.indexOf('{');
+    if (jsonStart === -1) throw new Error('Pas de JSON valide dans la réponse IA.');
+    var depth = 0, jsonEnd = -1;
+    for (var ci2 = jsonStart; ci2 < text.length; ci2++) {
+      if (text[ci2] === '{') depth++;
+      else if (text[ci2] === '}') { depth--; if (depth === 0) { jsonEnd = ci2; break; } }
+    }
+    if (jsonEnd === -1) throw new Error('JSON incomplet dans la réponse IA.');
+    var parsed = JSON.parse(text.slice(jsonStart, jsonEnd + 1));
+
+    // Valider le budget cote JS — Claude peut se tromper
+    var slidersSuggeres = parsed.sliders || {};
+    var totalPts = Object.entries(slidersSuggeres).reduce(function(sum, entry) {
+      return sum + Progression.clickCost(entry[1]);
+    }, 0);
+
+    if (totalPts > pointsMax) {
+      // Budget dépassé — corriger intelligemment en réduisant les sliders les moins prioritaires
+      var sliderKeys = Object.keys(slidersSuggeres).sort(function(a, b) {
+        return slidersSuggeres[b] - slidersSuggeres[a]; // du plus grand au plus petit
+      });
+      while (totalPts > pointsMax && sliderKeys.length > 0) {
+        var lastKey = sliderKeys[sliderKeys.length - 1];
+        if (slidersSuggeres[lastKey] > 2) {
+          slidersSuggeres[lastKey] -= 2;
+        } else {
+          delete slidersSuggeres[lastKey];
+          sliderKeys.pop();
+        }
+        totalPts = Object.entries(slidersSuggeres).reduce(function(sum, entry) {
+          return sum + Progression.clickCost(entry[1]);
+        }, 0);
+      }
+      parsed.sliders = slidersSuggeres;
+      parsed._budgetCorrige = true;
+    }
+
+    _buildIAResult = { data: parsed };
+
+  } catch(e) {
+    _buildIAResult = { error: 'Erreur : ' + e.message };
+  }
+
+  _buildIALoading = false;
+  var elFinal = document.getElementById('build-ia-result');
+  if (elFinal) {
+    if (_buildIAResult && _buildIAResult.error) {
+      elFinal.innerHTML = '<div style="color:var(--red);font-size:13px;padding:12px">' + _buildIAResult.error + '</div>';
+    } else if (_buildIAResult && _buildIAResult.data) {
+      var pl = State.players.find(function(p) { return p.id === playerId; });
+      var cd = (State.cards[playerId] || []).find(function(c) { return c.id === cardId; });
+      elFinal.innerHTML = renderBuildIAResult(_buildIAResult.data, pl, cd);
+    }
+  }
+}
+
+// ── Player Tabs ───────────────────────────────────────────────────────────────
 function renderPlayerTabs() {
   const tabs = [
-    { id: 'stats',  label: 'Stats & Build' },
-    { id: 'builds', label: 'Builds' },
-    { id: 'matchs', label: 'Matchs' },
+    { id: 'stats',    label: 'Stats & Build' },
+    { id: 'builds',   label: 'Builds' },
+    { id: 'matchs',   label: 'Matchs' },
+    { id: 'build-ia', label: '🤖 Build IA' },
   ];
   return `
     <div class="player-tabs">
@@ -1499,9 +2525,31 @@ function renderBuildCard(build, card) {
   const pointsUsed = Progression.totalPoints(sliders);
   const pointsMax = card.points_max || 0;
   const isTrending = card.card_type === 'Trending';
-  const buildMatches = State.matches.filter(m => m.build_id === build.id);
+  const buildMatches = filterStatsMatches(State.matches).filter(m =>
+    m.player_stats && m.player_stats.some(ps => ps.build_id === build.id)
+  );
   const stats = Analyse.globalStats(buildMatches);
   const serie = Analyse.series(buildMatches);
+
+  // Stats individuelles avec ce build
+  let bGoals = 0, bAssists = 0, bSaves = 0, bCS = 0, bRatings = [];
+  buildMatches.forEach(m => {
+    const ps = (m.player_stats || []).find(ps => ps.build_id === build.id);
+    if (ps) {
+      bGoals   += ps.goals   || 0;
+      bAssists += ps.assists || 0;
+      bSaves   += ps.saves   || 0;
+      if (ps.rating > 0) bRatings.push(ps.rating);
+    }
+    if (m.result === 'V' && (m.score_against === 0)) bCS++;
+  });
+  const bAvgRating = bRatings.length > 0
+    ? (bRatings.reduce((a,b) => a+b, 0) / bRatings.length).toFixed(1)
+    : null;
+  const bCSRate = buildMatches.length > 0 ? Math.round(bCS / buildMatches.length * 100) : 0;
+  const pos = card.efhub_stats?.position || '';
+  const isGK = pos === 'GK';
+
   const expandId = 'build-expand-' + build.id;
   const player = State.players.find(p => p.id === State.selectedPlayerId);
   const efhubId = player ? Efhub.parseId(player.efhub_url || '') : null;
@@ -1555,8 +2603,17 @@ function renderBuildCard(build, card) {
 
       ${buildMatches.length > 0 ? `
         <div class="build-perf">
-          <span class="build-perf-item">${stats.total} matchs</span>
-          <span class="build-perf-item win">${stats.winRate}% victoires</span>
+          <span class="build-perf-item">🎮 ${stats.total}</span>
+          <span class="build-perf-item win">${stats.winRate}% V</span>
+          ${bAvgRating ? `<span class="build-perf-item">⭐ ${bAvgRating}/10</span>` : ''}
+          ${isGK ? `
+            <span class="build-perf-item">${bSaves} arrêts</span>
+            <span class="build-perf-item">🧤 ${bCSRate}% CS</span>
+          ` : `
+            ${bGoals > 0 ? `<span class="build-perf-item">⚽ ${bGoals} buts</span>` : ''}
+            ${bAssists > 0 ? `<span class="build-perf-item">🎯 ${bAssists} passes</span>` : ''}
+            <span class="build-perf-item">🛡️ ${bCSRate}% CS</span>
+          `}
           <span class="build-perf-item serie">Série: ${serie.current}</span>
         </div>
       ` : ''}
@@ -2351,7 +3408,7 @@ async function generateCoaching() {
         'Authorization': 'Bearer ' + EFB_CONFIG.supabaseKey,
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1000,
         messages: [{ role: 'user', content: prompt }]
       })
@@ -2398,20 +3455,45 @@ function buildCoachingData() {
     };
   });
 
-  // Stats par build
+  // Stats par build — chercher dans player_stats[].build_id
   const buildStats = allBuilds.map(b => {
-    const bMatches = matches.filter(m => m.build_id === b.id);
+    const bMatches = matches.filter(m =>
+      m.player_stats && m.player_stats.some(function(ps) { return ps.build_id === b.id; })
+    );
     const bs = Analyse.globalStats(bMatches);
     const bSerie = Analyse.series(bMatches);
     const card = Object.values(State.cards).flat().find(c => c.id === b.card_id);
     const player = players.find(p => p.id === card?.player_id);
+
+    // Stats individuelles du joueur avec ce build
+    var goals = 0, assists = 0, ratings = [], saves = 0;
+    bMatches.forEach(function(m) {
+      var ps = (m.player_stats || []).find(function(ps) { return ps.build_id === b.id; });
+      if (ps) {
+        goals   += ps.goals   || 0;
+        assists += ps.assists || 0;
+        saves   += ps.saves   || 0;
+        if (ps.rating > 0) ratings.push(ps.rating);
+      }
+    });
+    var avgRating = ratings.length > 0
+      ? (ratings.reduce(function(a,x){return a+x;}, 0) / ratings.length).toFixed(1)
+      : null;
+
     return {
       name: b.name,
       player: player?.name || '?',
+      position: card ? (card.efhub_stats?.position || '?') : '?',
       matches: bs.total,
       winRate: bs.winRate,
       serie: bSerie.record,
       currentSerie: bSerie.current,
+      goals,
+      assists,
+      saves,
+      avgRating,
+      goalsPerMatch: bs.total > 0 ? (goals / bs.total).toFixed(1) : 0,
+      assistsPerMatch: bs.total > 0 ? (assists / bs.total).toFixed(1) : 0,
     };
   }).filter(b => b.matches > 0);
 
@@ -2508,9 +3590,18 @@ function buildCoachingPrompt(data) {
   var rankLines = data.byRank.map(function(r) {
     return '- ' + r.rank + ' : ' + r.winRate + '% (' + r.total + ' matchs, serie record: ' + r.serie.record + ')';
   }).join(nl);
-  var buildLines = data.buildStats.map(function(b) {
-    return '- ' + b.name + ' (' + b.player + ') : ' + b.winRate + '% sur ' + b.matches + ' matchs, serie: ' + b.serie + ', actuelle: ' + b.currentSerie;
-  }).join(nl);
+  var buildLines = data.buildStats.length > 0
+    ? data.buildStats.map(function(b) {
+        var stats = [];
+        if (b.avgRating) stats.push('note moy:' + b.avgRating + '/10');
+        if (b.goals > 0) stats.push(b.goals + ' buts (' + b.goalsPerMatch + '/match)');
+        if (b.assists > 0) stats.push(b.assists + ' passes (' + b.assistsPerMatch + '/match)');
+        if (b.saves > 0) stats.push(b.saves + ' arrêts');
+        return '- ' + b.name + ' [' + b.player + ' · ' + b.position + '] : ' + b.winRate + '% sur ' + b.matches + ' matchs' +
+          (stats.length > 0 ? ' | ' + stats.join(', ') : '') +
+          ' | série record:' + b.serie + ', actuelle:' + b.currentSerie;
+      }).join(nl)
+    : 'Aucun build avec données de match disponibles';
   var playerLines = data.playerStats.map(function(p) {
     return '- ' + p.name + ' : note ' + (p.avgRating || 'N/A') + '/10, ' + p.goals + ' buts, ' + p.assists + ' passes, ' + p.winRate + '% victoires';
   }).join(nl);
@@ -3840,11 +4931,11 @@ function loadCustomFormations() {
   } catch(e) { return {}; }
 }
 
-function saveCustomFormation(name, slots) {
+function saveCustomFormation(name, slots, notes) {
   try {
     var customs = loadCustomFormations();
     // Stocker comme layout plat : [{left, top, label}]
-    customs[name] = { slots: slots, custom: true };
+    customs[name] = { slots: slots, custom: true, notes: notes || '' };
     localStorage.setItem(CUSTOM_FORMATIONS_KEY, JSON.stringify(customs));
     // Injecter dans FORMATION_LAYOUTS pour utilisation immédiate
     injectCustomFormation(name, slots);
@@ -3956,9 +5047,13 @@ function renderFormationCard(name, isCustom) {
   var slots = buildPitchSlots(name);
   if (!slots) return '';
   var miniSvg = renderMiniPitchSVG(slots);
+  var customs = isCustom ? loadCustomFormations() : {};
+  var customData = customs[name] || {};
+  var notes = customData.notes || '';
   return '<div class="fmpicker-card" onclick="selectFormation(' + q + name.replace(/'/g,"\\'") + q + ')">' +
     miniSvg +
     '<div class="fmpicker-card-name">' + name + (isCustom ? ' <span class="badge-custom">Perso</span>' : '') + '</div>' +
+    (notes ? '<div style="font-size:9px;color:var(--text-secondary);padding:2px 4px;line-height:1.3;max-height:36px;overflow:hidden">' + notes.substring(0, 80) + (notes.length > 80 ? '...' : '') + '</div>' : '') +
     (isCustom ? '<button class="fmpicker-delete" onclick="deleteCustomFm(event,' + q + name.replace(/'/g,"\\'") + q + ')" title="Supprimer"><i class="ti ti-trash"></i></button>' : '') +
   '</div>';
 }
@@ -4646,7 +5741,9 @@ function renderMatchTabMain() {
   '</div>';
 
   rightCol += '<details class="match-instructions-details">' +
-    '<summary class="match-instructions-summary"><i class="ti ti-list-details"></i> Instructions individuelles</summary>' +
+    '<summary class="match-instructions-summary"><i class="ti ti-list-details"></i> Instructions individuelles' +
+    '<button class="btn-sm btn-ghost" style="margin-left:auto;font-size:11px;padding:2px 8px" onclick="event.preventDefault();requestInstructionsIA()" id="btn-instructions-ia"><i class="ti ti-wand"></i> IA</button>' +
+    '</summary>' +
     '<div class="instructions-grid" style="margin-top:8px">' +
       ['attack1','attack2','defence1','defence2'].map(function(slot) {
         var isAttack = slot.startsWith('attack');
@@ -6137,6 +7234,249 @@ function initMatchPlayerStatsFromLineup() {
       };
     }
   });
+}
+
+
+// ── Instructions IA ──────────────────────────────────────────────────────────
+async function requestInstructionsIA() {
+  var btn = document.getElementById('btn-instructions-ia');
+  if (btn && btn.disabled) return;
+  if (btn) { btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i>'; }
+
+  try {
+    // Titulaires actuels
+    if (_matchTitulaires.length === 0) {
+      showToast('Ajoute des titulaires d' + String.fromCharCode(39) + 'abord', 'warning');
+      return;
+    }
+
+    // Coach actif
+    var activeCoachId = getActiveCoachId();
+    var activeCoach = activeCoachId ? State.coaches.find(function(c){ return c.id === activeCoachId; }) : null;
+    var formation = document.getElementById('m-formation') ? document.getElementById('m-formation').value : (_matchLastFormation || '');
+
+    // Construire le contexte des titulaires
+    var nl = '\n';
+    var tituDetails = _matchTitulaires.map(function(t, i) {
+      var player = State.players.find(function(p){ return p.id === t.player_id; });
+      var cards = State.cards[t.player_id] || [];
+      var card = cards.find(function(c){ return c.id === t.card_id; }) || cards[0];
+      var pos = card ? (card.efhub_stats.position || '?') : '?';
+      var style = card ? (card.efhub_stats.playingStyle || '?') : '?';
+      var name = player ? player.name : 'Joueur';
+
+      // Stats de performance du joueur
+      var matches = filterStatsMatches(State.matches);
+      var playerMatches = matches.filter(function(m) {
+        return m.player_stats && m.player_stats.some(function(ps){ return ps.player_id === t.player_id; });
+      });
+      var goals = 0, assists = 0, ratings = [];
+      playerMatches.forEach(function(m) {
+        var ps = (m.player_stats || []).find(function(p){ return p.player_id === t.player_id; });
+        if (ps) { goals += ps.goals||0; assists += ps.assists||0; if(ps.rating) ratings.push(ps.rating); }
+      });
+      var avgRating = ratings.length > 0 ? (ratings.reduce(function(a,b){return a+b;},0)/ratings.length).toFixed(1) : 'N/A';
+      var winRate = playerMatches.length > 0 ? Math.round(playerMatches.filter(function(m){return m.result==='V';}).length/playerMatches.length*100) : 0;
+
+      return (i+1) + '. ' + name + ' [' + pos + '] style:' + style + ' — ' + playerMatches.length + ' matchs, ' + winRate + '% V, ' + goals + ' buts, ' + assists + ' passes, note:' + avgRating;
+    }).join(nl);
+
+    var prompt = 'Tu es un expert eFootball Mobile. Propose les meilleures instructions individuelles pour ce match.' + nl + nl +
+      (activeCoach ? 'COACH: ' + activeCoach.name + ' · Style: ' + (activeCoach.style||'—') + ' · Formation: ' + (activeCoach.formation||formation||'—') + nl + nl : '') +
+      'TITULAIRES:' + nl + tituDetails + nl + nl +
+      'INSTRUCTIONS ATTACK disponibles: Off, Defensive, Attacking, Anchoring' + nl +
+      'INSTRUCTIONS DEFENCE disponibles: Off, Tight Marking, Man Marking, Counter Target, Deep Line' + nl + nl +
+      'RÈGLES:' + nl +
+      '- Attack 1 & 2 : choisir UNIQUEMENT parmi: Off, Defensive, Attacking, Anchoring' + nl +
+      '- Defence 1 & 2 : choisir UNIQUEMENT parmi: Off, Tight Marking, Man Marking, Counter Target, Deep Line' + nl +
+      '- ATTENTION: Counter Target est DEFENCE uniquement. Attacking/Defensive/Anchoring sont ATTACK uniquement.' + nl +
+      '- RÈGLES STRICTES PAR POSITION pour Attack 1 & 2:' + nl +
+      '  * GK : Off uniquement' + nl +
+      '  * CB/LB/RB : Off ou Defensive uniquement' + nl +
+      '  * DMF : Off, Defensive ou Anchoring' + nl +
+      '  * CMF/LMF/RMF : Off, Defensive ou Attacking' + nl +
+      '  * AMF : Off, Attacking ou Anchoring' + nl +
+      '  * LWF/RWF : Off ou Defensive (Attacking non applicable)' + nl +
+      '  * CF/SS : Off ou Defensive (Attacking non applicable)' + nl +
+      '- RÈGLES STRICTES PAR POSITION pour Defence 1 & 2:' + nl +
+      '  * GK : Off uniquement' + nl +
+      '  * CB : Off, Tight Marking ou Man Marking' + nl +
+      '  * LB/RB : Off, Tight Marking, Man Marking ou Counter Target' + nl +
+      '  * DMF/CMF : Off, Tight Marking ou Man Marking' + nl +
+      '  * AMF/LMF/RMF : Off, Man Marking ou Counter Target' + nl +
+      '  * LWF/RWF/CF/SS : Off ou Counter Target' + nl +
+      '- Adapte selon le style du coach et les stats des joueurs' + nl +
+      '- Attacking pour les joueurs offensifs avec beaucoup de buts/passes' + nl +
+      '- Defensive/Anchoring pour les milieux défensifs ou joueurs avec faible win rate' + nl +
+      '- Man Marking pour presser les joueurs dangereux adverses' + nl +
+      '- Counter Target pour les attaquants rapides en contre-attaque' + nl + nl +
+      '- Pour chaque instruction, le Targeted Player est le joueur de TON équipe qui exécutera ce rôle tactique' + nl +
+      '- Exemples: Man Marking → assigne au DMF ou CB qui va presser | Counter Target → assigne au CF ou LWF rapide | Attacking → assigne à l' + String.fromCharCode(39) + 'AMF ou CMF offensif | Anchoring → assigne au DMF défensif' + nl +
+      '- Le target doit être le nom exact du joueur tel qu' + String.fromCharCode(39) + 'il apparaît dans la liste des titulaires' + nl +
+      '- Si l' + String.fromCharCode(39) + 'instruction est Off, cela signifie aucune instruction assignée — le target DOIT être "" (vide, aucun joueur)' + nl +
+      '- Ne propose un target que si l' + String.fromCharCode(39) + 'instruction est différente de Off' + nl + nl +
+      'Réponds UNIQUEMENT avec un JSON valide sans texte avant ou après:' + nl +
+      '{' + nl +
+      '  "attack1":"Attacking", "attack1_target":"Bellingham",' + nl +
+      '  "attack2":"Defensive", "attack2_target":"Valverde",' + nl +
+      '  "defence1":"Man Marking", "defence1_target":"Tchouameni",' + nl +
+      '  "defence2":"Counter Target", "defence2_target":"Mbappe",' + nl +
+      '  "justification":"Explication courte"' + nl +
+      '}';
+
+    var response = await fetch(EFB_CONFIG.supabaseUrl + '/functions/v1/coaching', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + EFB_CONFIG.supabaseKey },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 600, messages: [{ role: 'user', content: prompt }] })
+    });
+
+    var data = await response.json();
+    var text = (data.content || []).map(function(b){ return b.text||''; }).join('');
+
+    // Parser JSON
+    var jsonStart = text.indexOf('{');
+    var depth = 0, jsonEnd = -1;
+    for (var ci = jsonStart; ci < text.length; ci++) {
+      if (text[ci]==='{') depth++;
+      else if (text[ci]==='}') { depth--; if(depth===0){jsonEnd=ci;break;} }
+    }
+    var parsed = JSON.parse(text.slice(jsonStart, jsonEnd+1));
+
+    // Valider que les instructions sont dans le bon groupe
+    var validAttack = ['Off', 'Defensive', 'Attacking', 'Anchoring'];
+    var validDefence = ['Off', 'Tight Marking', 'Man Marking', 'Counter Target', 'Deep Line'];
+
+    function fixInstr(val, validList) {
+      if (!val) return 'Off';
+      var exact = validList.find(function(v){ return v.toLowerCase() === val.toLowerCase(); });
+      if (exact) return exact;
+      var partial = validList.find(function(v){ return v.toLowerCase().includes(val.toLowerCase()) || val.toLowerCase().includes(v.toLowerCase()); });
+      return partial || 'Off';
+    }
+
+    // Règles d'instructions valides par position
+    var validAttackByPos = {
+      'GK':  ['Off'],
+      'CB':  ['Off','Defensive'], 'LB': ['Off','Defensive'], 'RB': ['Off','Defensive'],
+      'DMF': ['Off','Defensive','Anchoring'],
+      'CMF': ['Off','Defensive','Attacking'], 'LMF': ['Off','Defensive','Attacking'], 'RMF': ['Off','Defensive','Attacking'],
+      'AMF': ['Off','Attacking','Anchoring'],
+      'LWF': ['Off','Defensive'], 'RWF': ['Off','Defensive'], 'CF': ['Off','Defensive'], 'SS': ['Off','Defensive']
+    };
+    var validDefenceByPos = {
+      'GK':  ['Off'],
+      'CB':  ['Off','Tight Marking','Man Marking'],
+      'LB':  ['Off','Tight Marking','Man Marking','Counter Target'],
+      'RB':  ['Off','Tight Marking','Man Marking','Counter Target'],
+      'DMF': ['Off','Tight Marking','Man Marking'], 'CMF': ['Off','Tight Marking','Man Marking'],
+      'AMF': ['Off','Man Marking','Counter Target'], 'LMF': ['Off','Man Marking','Counter Target'], 'RMF': ['Off','Man Marking','Counter Target'],
+      'LWF': ['Off','Counter Target'], 'RWF': ['Off','Counter Target'],
+      'CF':  ['Off','Counter Target'], 'SS': ['Off','Counter Target']
+    };
+
+    // Appliquer par position des joueurs ciblés
+    function getTargetPos(targetName) {
+      if (!targetName) return null;
+      var p = State.players.find(function(pl){
+        return pl.name.toLowerCase() === targetName.toLowerCase() ||
+               pl.name.toLowerCase().includes(targetName.toLowerCase());
+      });
+      if (!p) return null;
+      var titu = _matchTitulaires.find(function(t){ return t.player_id === p.id; });
+      if (!titu) return null;
+      var cards = State.cards[p.id] || [];
+      var card = cards.find(function(c){ return c.id === titu.card_id; }) || cards[0];
+      return card ? (card.efhub_stats.position || null) : null;
+    }
+
+    function fixInstrByPos(val, targetName, validList, byPosMap) {
+      var pos = getTargetPos(targetName);
+      var allowed = pos && byPosMap[pos] ? byPosMap[pos] : validList;
+      return fixInstr(val, allowed);
+    }
+
+    parsed.attack1  = fixInstrByPos(parsed.attack1,  parsed.attack1_target,  validAttack, validAttackByPos);
+    parsed.attack2  = fixInstrByPos(parsed.attack2,  parsed.attack2_target,  validAttack, validAttackByPos);
+    parsed.defence1 = fixInstrByPos(parsed.defence1, parsed.defence1_target, validDefence, validDefenceByPos);
+    parsed.defence2 = fixInstrByPos(parsed.defence2, parsed.defence2_target, validDefence, validDefenceByPos);
+
+    // Ouvrir le details d'abord
+    var details = document.querySelector('.match-instructions-details');
+    if (details) details.open = true;
+
+    // Appliquer dans _matchFormState — instructions
+    if (parsed.attack1) _matchFormState['m-attack1-instruction'] = parsed.attack1;
+    if (parsed.attack2) _matchFormState['m-attack2-instruction'] = parsed.attack2;
+    if (parsed.defence1) _matchFormState['m-defence1-instruction'] = parsed.defence1;
+    if (parsed.defence2) _matchFormState['m-defence2-instruction'] = parsed.defence2;
+
+    // Résoudre les targets (nom → player_id)
+    function resolveTarget(name) {
+      if (!name) return '';
+      var p = State.players.find(function(pl) {
+        return pl.name.toLowerCase() === name.toLowerCase() ||
+               pl.name.toLowerCase().includes(name.toLowerCase());
+      });
+      return p ? p.id : '';
+    }
+    // Si instruction Off → pas de target
+    var a1t = parsed.attack1  !== 'Off' ? resolveTarget(parsed.attack1_target)  : '';
+    var a2t = parsed.attack2  !== 'Off' ? resolveTarget(parsed.attack2_target)  : '';
+    var d1t = parsed.defence1 !== 'Off' ? resolveTarget(parsed.defence1_target) : '';
+    var d2t = parsed.defence2 !== 'Off' ? resolveTarget(parsed.defence2_target) : '';
+
+    if (a1t) _matchFormState['m-attack1-target'] = a1t;
+    if (a2t) _matchFormState['m-attack2-target'] = a2t;
+    if (d1t) _matchFormState['m-defence1-target'] = d1t;
+    if (d2t) _matchFormState['m-defence2-target'] = d2t;
+
+    // Remplir directement les selects DOM — instructions
+    var instrMap = {
+      'm-attack1-instruction': parsed.attack1,
+      'm-attack2-instruction': parsed.attack2,
+      'm-defence1-instruction': parsed.defence1,
+      'm-defence2-instruction': parsed.defence2
+    };
+    Object.keys(instrMap).forEach(function(id) {
+      var val = instrMap[id];
+      if (!val) return;
+      var el = document.getElementById(id);
+      if (el) {
+        var found = false;
+        for (var oi = 0; oi < el.options.length; oi++) {
+          if (el.options[oi].value.toLowerCase() === val.toLowerCase()) {
+            el.selectedIndex = oi; found = true; break;
+          }
+        }
+        if (!found) el.value = val;
+      }
+    });
+
+    // Remplir les selects target DOM
+    var targetMap = {
+      'm-attack1-target': a1t,
+      'm-attack2-target': a2t,
+      'm-defence1-target': d1t,
+      'm-defence2-target': d2t
+    };
+    Object.keys(targetMap).forEach(function(id) {
+      var val = targetMap[id];
+      if (!val) return;
+      var el = document.getElementById(id);
+      if (el) el.value = val;
+    });
+
+    restoreMatchFormState();
+    saveLastInstructions();
+
+    if (parsed.justification) showToast('🤖 ' + parsed.justification, 'info', 5000);
+
+  } catch(e) {
+    showToast('Erreur IA instructions : ' + e.message, 'error');
+  }
+
+  var btn2 = document.getElementById('btn-instructions-ia');
+  if (btn2) { btn2.disabled = false; btn2.innerHTML = '<i class="ti ti-wand"></i> IA'; }
 }
 
 function saveLastInstructions() {
