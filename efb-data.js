@@ -173,7 +173,7 @@ const AppState = {
 // ── MATCHES ───────────────────────────────────────────────────────────────────
 const Matches = {
   getAll() {
-    return sbFetch('efb_matches?select=*,efb_builds(name,efb_cards(efb_players(name))),efb_coaches(name,style,formation)&order=played_at.desc');
+    return sbFetch('efb_matches?select=*,efb_builds(name,efb_cards(efb_players(name))),efb_coaches(name,style)&order=played_at.desc');
   },
   getByBuild(buildId) {
     return sbFetch(`efb_matches?build_id=eq.${buildId}&select=*&order=played_at.desc`);
@@ -419,6 +419,88 @@ const Analyse = {
       ...this.globalStats(data.matches),
       serie: this.series(data.matches),
     })).sort((a, b) => b.winRate - a.winRate);
+  },
+
+  // Instructions individuelles — par joueur + instruction
+  byIndividualInstruction(matches) {
+    const slots = ['attack1', 'attack2', 'defence1', 'defence2'];
+    const combos = {};
+    matches.forEach(m => {
+      slots.forEach(slot => {
+        const instr = m[slot + '_instruction'];
+        const targetId = m[slot + '_target'];
+        if (!instr || instr === 'Off' || !targetId) return;
+        const key = targetId + '|' + instr;
+        if (!combos[key]) combos[key] = {
+          player_id: targetId,
+          instruction: instr,
+          slot,
+          matches: [],
+        };
+        combos[key].matches.push(m);
+      });
+    });
+    return Object.values(combos).map(c => {
+      const stats = this.globalStats(c.matches);
+      const goalsAgainst = c.matches.reduce((s, m) => s + (m.score_against || 0), 0);
+      return {
+        player_id: c.player_id,
+        instruction: c.instruction,
+        slot: c.slot,
+        total: stats.total,
+        wins: stats.wins,
+        winRate: stats.winRate,
+        goalsFor: stats.goalsFor,
+        goalsAgainst,
+        avgGoalsFor: stats.total > 0 ? (stats.goalsFor / stats.total).toFixed(1) : 0,
+        avgGoalsAgainst: stats.total > 0 ? (goalsAgainst / stats.total).toFixed(1) : 0,
+      };
+    })
+    .filter(c => c.total >= 3)
+    .sort((a, b) => b.winRate - a.winRate);
+  },
+
+  // Performance défensive par joueur (min 3 matchs)
+  byDefensive(matches) {
+    const players = {};
+    matches.forEach(m => {
+      const goalsAgainst = m.score_against || 0;
+      const isCleanSheet = goalsAgainst === 0;
+      (m.player_stats || []).forEach(ps => {
+        if (!players[ps.player_id]) {
+          players[ps.player_id] = {
+            player_id: ps.player_id,
+            matches: 0,
+            wins: 0,
+            cleanSheets: 0,
+            totalGoalsAgainst: 0,
+            ratings: [],
+          };
+        }
+        var p = players[ps.player_id];
+        p.matches++;
+        if (m.result === 'V') p.wins++;
+        if (isCleanSheet) p.cleanSheets++;
+        p.totalGoalsAgainst += goalsAgainst;
+        if (ps.rating > 0) p.ratings.push(ps.rating);
+      });
+    });
+
+    return Object.values(players)
+      .filter(p => p.matches >= 3)
+      .map(p => ({
+        player_id: p.player_id,
+        matches: p.matches,
+        wins: p.wins,
+        winRate: p.matches > 0 ? Math.round(p.wins / p.matches * 100) : 0,
+        cleanSheets: p.cleanSheets,
+        cleanSheetRate: p.matches > 0 ? Math.round(p.cleanSheets / p.matches * 100) : 0,
+        avgGoalsAgainst: p.matches > 0 ? (p.totalGoalsAgainst / p.matches).toFixed(1) : '0.0',
+        avgRating: p.ratings.length > 0
+          ? (p.ratings.reduce((a, b) => a + b, 0) / p.ratings.length).toFixed(1)
+          : null,
+      }))
+      .sort((a, b) => b.cleanSheetRate - a.cleanSheetRate);
   },
 
   // Meilleur XI — joueurs avec le meilleur taux de victoire (min 3 matchs)

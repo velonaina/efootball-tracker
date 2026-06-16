@@ -118,6 +118,12 @@ select option{background:var(--bg2)}
         <div class="ig"><label>Notre formation</label><input type="text" id="p-formation" placeholder="ex: 4-3-3"></div>
         <div class="ig"><label>Formation adverse</label><input type="text" id="p-opp-formation" placeholder="ex: 4-4-2"></div>
       </div>
+      <div class="ig">
+        <label>🎽 Coach utilisé</label>
+        <select id="p-coach-id" style="width:100%">
+          <option value="">— Sans coach —</option>
+        </select>
+      </div>
       <div class="grid2">
         <div class="ig"><label>📊 Mon rang</label><input type="number" id="p-my-rank" placeholder="ex: 1250" style="text-align:center"></div>
         <div class="ig"><label>📊 Rang adverse</label><input type="number" id="p-opp-rank" placeholder="ex: 1380" style="text-align:center"></div>
@@ -299,13 +305,14 @@ var LEVEL_TYPES = ['ligue_jcj_d1','ligue_jcj_d2','ligue_jcj_d3','ligue_ia_d1','l
 var SQUAD_STORAGE_KEY = 'efb_squad_23';
 var LINEUP_STORAGE_KEY = 'efb_last_lineup';
 var FT_STORAGE_KEY = 'efb_ft_lineup';
+var COACH_STORAGE_KEY = 'efb_active_coach';
 
 // ── State ─────────────────────────────────────────────────────────────────────
 var S = { players: [], cards: [], builds: [] };
 var match = {
   opp: '', matchType: '', matchLevel: '', formation: '', oppFormation: '',
   myRank: null, oppRank: null, myStrength: null, oppStrength: null,
-  date: '', time: '',
+  date: '', time: '', coach_id: null,
   attack1_instruction: 'Off', attack1_target: null,
   attack2_instruction: 'Off', attack2_target: null,
   defence1_instruction: 'Off', defence1_target: null,
@@ -457,16 +464,30 @@ function loadData() {
     sbFetch('efb_players?select=*&order=name.asc'),
     sbFetch('efb_cards?select=*&order=created_at.asc'),
     sbFetch('efb_builds?select=*,efb_cards(efb_players(name))&order=name.asc'),
+    sbFetch('efb_coaches?select=*&order=name.asc'),
   ]).then(function(res) {
     S.players = res[0] || [];
     S.cards = res[1] || [];
     S.builds = res[2] || [];
+    S.coaches = res[3] || [];
     document.getElementById('sync-status').textContent = '✅ ' + S.players.length + ' joueurs';
     applyLineup();
     renderPlayerTargets();
+    renderCoachSelect();
   }).catch(function(e) {
     document.getElementById('sync-status').textContent = '⚠️ Hors ligne';
     console.error(e);
+  });
+}
+
+function renderCoachSelect() {
+  var sel = document.getElementById('p-coach-id');
+  if (!sel) return;
+  var activeCoachId = localStorage.getItem(COACH_STORAGE_KEY) || '';
+  sel.innerHTML = '<option value="">— Sans coach —</option>';
+  S.coaches.forEach(function(c) {
+    sel.innerHTML += '<option value="' + c.id + '"' + (c.id === activeCoachId ? ' selected' : '') + '>' +
+      c.name + (c.style ? ' · ' + c.style : '') + '</option>';
   });
 }
 
@@ -528,6 +549,7 @@ function startMatch() {
   match.matchLevel = document.getElementById('p-level').value;
   match.formation = document.getElementById('p-formation').value.trim();
   match.oppFormation = document.getElementById('p-opp-formation').value.trim();
+  match.coach_id = document.getElementById('p-coach-id').value || null;
   match.myRank = parseInt(document.getElementById('p-my-rank').value) || null;
   match.oppRank = parseInt(document.getElementById('p-opp-rank').value) || null;
   match.myStrength = parseInt(document.getElementById('p-my-strength').value) || null;
@@ -783,6 +805,7 @@ function saveMatchFinal() {
     match_type: match.matchType,
     match_level: match.matchLevel || null,
     rank: match.myRank || null,
+    coach_id: match.coach_id || null,
     result: result,
     score_for: match.us,
     score_against: match.them,
@@ -822,7 +845,7 @@ function saveMatchFinal() {
     match = {
       opp: '', matchType: '', matchLevel: '', formation: '', oppFormation: '',
       myRank: null, oppRank: null, myStrength: null, oppStrength: null,
-      date: '', time: '',
+      date: '', time: '', coach_id: null,
       attack1_instruction: 'Off', attack1_target: null,
       attack2_instruction: 'Off', attack2_target: null,
       defence1_instruction: 'Off', defence1_target: null,
