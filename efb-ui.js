@@ -5395,6 +5395,7 @@ function closeFmEditor() {
 
 var MATCH_DRAFT_KEY = 'efb_match_draft';
 var _matchDraftInterval = null;
+var _matchRestoringDraft = false;
 
 function saveMatchDraft() {
   try {
@@ -5425,9 +5426,10 @@ function clearMatchDraft() {
   if (_matchDraftInterval) { clearInterval(_matchDraftInterval); _matchDraftInterval = null; }
 }
 
-function startMatchDraftAutosave() {
-  clearMatchDraft();
-  _matchDraftInterval = setInterval(saveMatchDraft, 15000); // toutes les 15 secondes
+function startMatchDraftAutosave(keepExisting) {
+  if (!keepExisting) clearMatchDraft();
+  if (_matchDraftInterval) clearInterval(_matchDraftInterval);
+  _matchDraftInterval = setInterval(saveMatchDraft, 5000);
 }
 
 function checkMatchDraftOnLoad() {
@@ -5457,6 +5459,7 @@ function restoreMatchDraft() {
   if (banner) banner.remove();
 
   // Restaurer l'état
+  _matchRestoringDraft = true;
   _matchFormState = draft.formState || {};
   _matchSummaryState = draft.summaryState || {};
   _matchPlayerStats = draft.playerStats || {};
@@ -5465,15 +5468,14 @@ function restoreMatchDraft() {
   _matchRemplacants = draft.remplacants || [];
   _matchLastFormation = draft.lastFormation || '';
   _matchActiveTab = 'match';
-  _matchFormState = draft.formState || {};
-  _matchSummaryState = draft.summaryState || {};
 
   // Ouvrir le modal
   openModal('addMatch', null);
   setTimeout(function() {
     restoreMatchFormState();
-    applyLastInstructions();
-    startMatchDraftAutosave();
+    _matchRestoringDraft = false;
+    startMatchDraftAutosave(true);
+    saveMatchDraft();
     showToast('Match restauré !', 'success');
   }, 100);
 }
@@ -5485,19 +5487,21 @@ function dismissMatchDraft() {
 }
 
 function renderModalAddMatch(buildId) {
-  _matchPlayerStats = {};
-  _matchSubs = [];
-  _matchActiveTab = 'match';
-  _matchFormState = {};
-  _matchSummaryState = {};
-  _pitchSelectedPid = null;
-  _pitchSelectedSlot = null;
-  _pitchSubMode = false;
-  _pitchSubOutPid = null;
-  loadSquad23IntoLineup();
-  initMatchPlayerStatsFromLineup();
-  setTimeout(applyLastInstructions, 80);
-  startMatchDraftAutosave();
+  if (!_matchRestoringDraft) {
+    _matchPlayerStats = {};
+    _matchSubs = [];
+    _matchActiveTab = 'match';
+    _matchFormState = {};
+    _matchSummaryState = {};
+    _pitchSelectedPid = null;
+    _pitchSelectedSlot = null;
+    _pitchSubMode = false;
+    _pitchSubOutPid = null;
+    loadSquad23IntoLineup();
+    initMatchPlayerStatsFromLineup();
+    setTimeout(applyLastInstructions, 80);
+    startMatchDraftAutosave();
+  }
 
   var now = new Date();
   var todayDate = now.toISOString().split('T')[0];
@@ -6224,6 +6228,7 @@ function pitchSetRating(pid, val) {
   if (!_matchPlayerStats[pid]) _matchPlayerStats[pid] = { goals:0, assists:0, saves:0, yellow_card:false, red_card:false, rating:0 };
   _matchPlayerStats[pid].rating = _matchPlayerStats[pid].rating === val ? 0 : val;
   refreshPitchStats();
+  saveMatchDraft();
 }
 
 var _matchHDivDragging = false;
@@ -6973,6 +6978,7 @@ function updateMatchStat(pid, stat, delta) {
       saveMatchFormState();
     }
   }
+  saveMatchDraft();
 }
 
 function toggleMatchCard(pid, type) {
