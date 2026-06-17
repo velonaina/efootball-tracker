@@ -5395,7 +5395,6 @@ function closeFmEditor() {
 
 var MATCH_DRAFT_KEY = 'efb_match_draft';
 var _matchDraftInterval = null;
-var _matchRestoringDraft = false;
 
 function saveMatchDraft() {
   try {
@@ -5426,10 +5425,9 @@ function clearMatchDraft() {
   if (_matchDraftInterval) { clearInterval(_matchDraftInterval); _matchDraftInterval = null; }
 }
 
-function startMatchDraftAutosave(keepExisting) {
-  if (!keepExisting) clearMatchDraft();
-  if (_matchDraftInterval) clearInterval(_matchDraftInterval);
-  _matchDraftInterval = setInterval(saveMatchDraft, 5000);
+function startMatchDraftAutosave() {
+  clearMatchDraft();
+  _matchDraftInterval = setInterval(saveMatchDraft, 15000); // toutes les 15 secondes
 }
 
 function checkMatchDraftOnLoad() {
@@ -5459,7 +5457,6 @@ function restoreMatchDraft() {
   if (banner) banner.remove();
 
   // Restaurer l'état
-  _matchRestoringDraft = true;
   _matchFormState = draft.formState || {};
   _matchSummaryState = draft.summaryState || {};
   _matchPlayerStats = draft.playerStats || {};
@@ -5468,14 +5465,15 @@ function restoreMatchDraft() {
   _matchRemplacants = draft.remplacants || [];
   _matchLastFormation = draft.lastFormation || '';
   _matchActiveTab = 'match';
+  _matchFormState = draft.formState || {};
+  _matchSummaryState = draft.summaryState || {};
 
   // Ouvrir le modal
   openModal('addMatch', null);
   setTimeout(function() {
     restoreMatchFormState();
-    _matchRestoringDraft = false;
-    startMatchDraftAutosave(true);
-    saveMatchDraft();
+    applyLastInstructions();
+    startMatchDraftAutosave();
     showToast('Match restauré !', 'success');
   }, 100);
 }
@@ -5487,21 +5485,19 @@ function dismissMatchDraft() {
 }
 
 function renderModalAddMatch(buildId) {
-  if (!_matchRestoringDraft) {
-    _matchPlayerStats = {};
-    _matchSubs = [];
-    _matchActiveTab = 'match';
-    _matchFormState = {};
-    _matchSummaryState = {};
-    _pitchSelectedPid = null;
-    _pitchSelectedSlot = null;
-    _pitchSubMode = false;
-    _pitchSubOutPid = null;
-    loadSquad23IntoLineup();
-    initMatchPlayerStatsFromLineup();
-    setTimeout(applyLastInstructions, 80);
-    startMatchDraftAutosave();
-  }
+  _matchPlayerStats = {};
+  _matchSubs = [];
+  _matchActiveTab = 'match';
+  _matchFormState = {};
+  _matchSummaryState = {};
+  _pitchSelectedPid = null;
+  _pitchSelectedSlot = null;
+  _pitchSubMode = false;
+  _pitchSubOutPid = null;
+  loadSquad23IntoLineup();
+  initMatchPlayerStatsFromLineup();
+  setTimeout(applyLastInstructions, 80);
+  startMatchDraftAutosave();
 
   var now = new Date();
   var todayDate = now.toISOString().split('T')[0];
@@ -5853,9 +5849,8 @@ function renderPitchSVG(slots, formation) {
       nodeHtml += '<text x="' + (cx+10) + '" y="' + (cy-7) + '" text-anchor="middle" font-size="7" font-weight="700" fill="#fff">' + statCount + '</text>';
     }
 
-    // Label position — priorité à position_label du titulaire si défini
-    var displayLabel = (titu && titu.position_label) ? titu.position_label : slot.label;
-    nodeHtml += '<text x="' + cx + '" y="' + (cy+4) + '" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">' + displayLabel + '</text>';
+    // Label position
+    nodeHtml += '<text x="' + cx + '" y="' + (cy+4) + '" text-anchor="middle" font-size="8" font-weight="700" fill="#fff">' + slot.label + '</text>';
 
     // Nom joueur (sous le cercle)
     nodeHtml += '<text x="' + cx + '" y="' + (cy+r+9) + '" text-anchor="middle" font-size="7.5" fill="' + (sub ? '#34d399' : '#e2e8f0') + '" font-weight="600">' + name + '</text>';
@@ -6229,7 +6224,6 @@ function pitchSetRating(pid, val) {
   if (!_matchPlayerStats[pid]) _matchPlayerStats[pid] = { goals:0, assists:0, saves:0, yellow_card:false, red_card:false, rating:0 };
   _matchPlayerStats[pid].rating = _matchPlayerStats[pid].rating === val ? 0 : val;
   refreshPitchStats();
-  saveMatchDraft();
 }
 
 var _matchHDivDragging = false;
@@ -6282,21 +6276,25 @@ function openSwapPlayerPicker(slotIdx, btn) {
   picker.style.cssText = 'position:fixed;z-index:100000;background:var(--surface);border:0.5px solid var(--accent);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:4px;box-shadow:0 4px 20px rgba(0,0,0,0.6);max-width:220px;max-height:300px;overflow-y:auto';
   picker.style.left = Math.min(rect.left, window.innerWidth - 230) + 'px';
   picker.style.top  = (rect.bottom + 4) + 'px';
+
   var title = document.createElement('div');
   title.style.cssText = 'font-size:10px;font-weight:700;color:var(--muted);padding:2px 4px;border-bottom:1px solid var(--border);margin-bottom:2px';
   title.textContent = 'Changer le titulaire';
   picker.appendChild(title);
+
   var tituIds = _matchTitulaires.filter(function(t){ return t && t.player_id; }).map(function(t){ return t.player_id; });
   var squad23Ids = _squad23.map(function(s){ return s.player_id; });
   var priority = State.players.filter(function(p){ return squad23Ids.includes(p.id) && !tituIds.includes(p.id); });
   var rest = State.players.filter(function(p){ return !squad23Ids.includes(p.id) && !tituIds.includes(p.id); });
   var playerList = priority.concat(rest);
+
   if (playerList.length === 0) {
     var empty = document.createElement('div');
     empty.style.cssText = 'font-size:11px;color:var(--muted);padding:6px';
     empty.textContent = 'Aucun joueur disponible';
     picker.appendChild(empty);
   }
+
   playerList.forEach(function(p) {
     var cards = State.cards[p.id] || [];
     var card = cards[0];
@@ -6317,6 +6315,7 @@ function openSwapPlayerPicker(slotIdx, btn) {
     };
     picker.appendChild(b);
   });
+
   document.body.appendChild(picker);
   setTimeout(function() {
     document.addEventListener('mousedown', function close(e) {
@@ -6333,7 +6332,7 @@ function openRolePicker(slotIdx, btn) {
   var rect = btn.getBoundingClientRect();
   var picker = document.createElement('div');
   picker.id = 'role-picker';
-  picker.style.cssText = 'position:fixed;z-index:100000;background:var(--surface);border:0.5px solid var(--accent);border-radius:8px;padding:6px;display:flex;flex-wrap:wrap;gap:4px;box-shadow:0 4px 20px rgba(0,0,0,0.6);max-width:200px;';
+  picker.style.cssText = 'position:fixed;z-index:500;background:var(--surface);border:0.5px solid var(--accent);border-radius:8px;padding:6px;display:flex;flex-wrap:wrap;gap:4px;box-shadow:0 4px 20px rgba(0,0,0,0.6);max-width:200px;';
   picker.style.left = Math.min(rect.left, window.innerWidth - 210) + 'px';
   picker.style.top  = (rect.bottom + 4) + 'px';
 
@@ -6344,17 +6343,11 @@ function openRolePicker(slotIdx, btn) {
     b.onmouseenter = function() { b.style.background = 'var(--accent)'; b.style.color = '#fff'; };
     b.onmouseleave = function() { b.style.background = 'var(--surface3)'; b.style.color = 'var(--text)'; };
     b.onclick = function() {
-      var currentFormation = (document.getElementById('m-formation') && document.getElementById('m-formation').value)
-        ? document.getElementById('m-formation').value : _matchLastFormation;
-      if (currentFormation) {
-        if (!POSITION_LABELS_BY_FORMATION[currentFormation]) {
-          var initSlots = buildPitchSlots(currentFormation);
-          if (initSlots) POSITION_LABELS_BY_FORMATION[currentFormation] = initSlots.map(function(s){ return s.label; });
-        }
-        var labels = POSITION_LABELS_BY_FORMATION[currentFormation];
-        if (labels && slotIdx < labels.length) labels[slotIdx] = pos;
+      // Mettre à jour le label
+      var labels = POSITION_LABELS_BY_FORMATION[_matchLastFormation];
+      if (labels && labels[slotIdx] !== undefined) {
+        labels[slotIdx] = pos;
       }
-      if (_matchTitulaires[slotIdx]) _matchTitulaires[slotIdx].position_label = pos;
       picker.remove();
       refreshPitchStats();
     };
@@ -6980,7 +6973,6 @@ function updateMatchStat(pid, stat, delta) {
       saveMatchFormState();
     }
   }
-  saveMatchDraft();
 }
 
 function toggleMatchCard(pid, type) {
