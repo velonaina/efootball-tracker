@@ -652,19 +652,44 @@ async function requestFormationIA() {
     }).join('\n');
 
     var nl = '\n';
-    var prompt = 'Tu es un expert eFootball Mobile. Analyse ce squad et propose la formation + composition optimale en te basant PRINCIPALEMENT sur les builds actuels des joueurs et leurs stats développées.' + nl + nl +
+    // Formations gagnantes (>60% victoires avec min 5 matchs)
+    var formationsGagnantes = Object.entries(formationStats)
+      .filter(function(e){ return e[1].total >= 5 && Math.round(e[1].wins/e[1].total*100) >= 60; })
+      .sort(function(a,b){ return (b[1].wins/b[1].total) - (a[1].wins/a[1].total); })
+      .map(function(e){ return e[0] + ' (' + Math.round(e[1].wins/e[1].total*100) + '% sur ' + e[1].total + ' matchs)'; })
+      .join(', ') || 'Aucune formation avec 5+ matchs et >60%';
+
+    // Joueurs rapides (speed/acceleration élevé) pour Quick Counter
+    var joueursRapides = squad23Unique.filter(function(s) {
+      var cards = State.cards[s.player_id] || [];
+      var card = cards.find(function(c){ return c.id === s.card_id; }) || cards[0];
+      if (!card || !card.efhub_stats) return false;
+      var build = (State.builds[s.card_id] || []).find(function(b){ return b.id === s.build_id; });
+      var stats = build ? Progression.allStatsFinal(card.efhub_stats, build.sliders || {}) : card.efhub_stats;
+      return (stats.speed || 0) >= 80 || (stats.acceleration || 0) >= 80;
+    }).map(function(s){
+      var p = State.players.find(function(pl){ return pl.id === s.player_id; });
+      return p ? p.name : '';
+    }).filter(Boolean).join(', ');
+
+    var prompt = 'Tu es un expert eFootball Mobile. Analyse ce squad et propose la formation + composition optimale pour atteindre 70% de victoires.' + nl + nl +
       (activeCoach ? 'COACH ACTIF: ' + activeCoach.name + ' · Style: ' + (activeCoach.style||'—') + ' · Formation préférée: ' + (activeCoach.formation||'—') + nl + nl : '') +
-      'HISTORIQUE PAR FORMATION (indicatif seulement — ne pas se limiter aux formations déjà utilisées): ' + formationStatsStr + nl + nl +
+      'FORMATIONS GAGNANTES (>60% victoires, min 5 matchs — privilégier ces formations): ' + formationsGagnantes + nl + nl +
+      'HISTORIQUE COMPLET PAR FORMATION: ' + formationStatsStr + nl + nl +
       'SQUAD 23 avec builds et stats développées (' + squad23Unique.length + ' joueurs):' + nl + squadDetails + nl + nl +
-      'PRIORITÉ DE DÉCISION: 1) Stats développées des builds → 2) Style de jeu du coach → 3) Position naturelle → 4) Historique victoires' + nl + nl +
+      (joueursRapides ? 'JOUEURS RAPIDES (speed/accel ≥80, priorité en Quick Counter): ' + joueursRapides + nl + nl : '') +
+      'PRIORITÉ DE DÉCISION:' + nl +
+      '1. Stats développées des builds (speed, finishing, defensiveAwareness selon position)' + nl +
+      '2. Formations gagnantes dans l' + String.fromCharCode(39) + 'historique (>60% victoires)' + nl +
+      '3. Compatibilité style coach/joueurs (Quick Counter → joueurs rapides en avant, Possession → bonne passe)' + nl +
+      '4. Position naturelle des joueurs' + nl + nl +
       'FORMATIONS DISPONIBLES (liste exhaustive — tu NE PEUX PAS utiliser une autre formation):' + nl + availableFormations + nl + nl +
       'POSITIONS PAR FORMATION:' + nl + positionsParFormation + nl + nl +
       'RÈGLES ABSOLUES:' + nl +
-      '- La formation DOIT être exactement l' + String.fromCharCode(39) + 'une de celles listées ci-dessus, mot pour mot. Pas de variante, pas d' + String.fromCharCode(39) + 'invention.' + nl +
+      '- La formation DOIT être exactement l' + String.fromCharCode(39) + 'une de celles listées ci-dessus, mot pour mot.' + nl +
       '- Slot 0 = toujours GK' + nl +
       '- Assigne chaque joueur à un slot en respectant sa position naturelle' + nl +
-      '- Priorise les joueurs dont la position correspond au slot' + nl +
-      '- Adapte la formation au style du coach (ex: Quick Counter → formation compacte avec vitesse)' + nl +
+      '- Priorise les joueurs dont les stats builds correspondent au rôle (ex: speed élevé → LWF/RWF en QC)' + nl +
       '- Utilise exactement 11 joueurs titulaires (slots 0 à 10)' + nl +
       '- VÉRIFIE que ta formation est dans la liste avant de répondre' + nl + nl +
       'Réponds UNIQUEMENT avec un objet JSON valide, sans texte avant ou après:' + nl +
@@ -675,14 +700,14 @@ async function requestFormationIA() {
       '    {"slot_idx": 1, "player_name": "Nom"}' + nl +
       '  ],' + nl +
       '  "raison_formation": "Pourquoi cette formation est optimale pour ces builds et ce coach (2-3 phrases)",' + nl +
-      '  "atouts_cles": "Les 2-3 forces principales de cette composition (stats développées, synergies)",' + nl +
-      '  "instructions_match": "Instructions tactiques concrètes pour gagner : comment attaquer, défendre, exploiter les faiblesses adverses (3-4 phrases)"' + nl +
+      '  "atouts_cles": "Les 2-3 forces principales de cette composition avec stats concrètes",' + nl +
+      '  "instructions_match": "Instructions tactiques précises pour gagner : comment exploiter les stats builds, défendre, contre-attaquer (3-4 phrases)"' + nl +
       '}' + nl + nl +
       'IMPORTANT:' + nl +
       '- Utilise exactement les noms des joueurs tels qu' + String.fromCharCode(39) + 'ils apparaissent dans le Squad 23.' + nl +
-      '- NE PAS inclure position_label — les positions sont déduites automatiquement depuis la formation.' + nl +
-      '- slot_idx va de 0 à 10, chaque slot correspond à une position fixe définie dans POSITIONS PAR FORMATION.' + nl +
-      '- Les instructions_match doivent être précises et actionnables, pas génériques.';
+      '- NE PAS inclure position_label.' + nl +
+      '- slot_idx va de 0 à 10.' + nl +
+      '- Les instructions_match doivent citer les joueurs et leurs stats concrètes, pas des généralités.';
 
     var data = await fetchCoachingWithRetry({ model: 'claude-sonnet-4-6', max_tokens: 1800, messages: [{ role: 'user', content: prompt }] });
     var text = (data.content || []).map(function(b){ return b.text||''; }).join('');
@@ -733,7 +758,7 @@ async function requestFormationIA() {
           slot_idx: t.slot_idx,
           player_id: sq.player_id,
           card_id: sq.card_id,
-          build_id: sq.build_id,
+          build_id: resolveBuildId(sq.player_id, sq.card_id, sq.build_id),
           position_label: officialLabels[t.slot_idx] || '?' // toujours depuis la liste officielle
         };
       }
@@ -1128,7 +1153,7 @@ function ftAssignToSlot(pid) {
     _ftRemplacants[fromBenchIdx] = {
       player_id: displacedPid,
       card_id: card2 ? card2.id : null,
-      build_id: sq2 ? sq2.build_id : null,
+      build_id: resolveBuildId(displacedPid, card2 ? card2.id : null, sq2 ? sq2.build_id : null),
     };
   } else {
     // Joueur hors banc → retirer du banc si présent, envoyer l'ancien titulaire au banc
@@ -1140,7 +1165,7 @@ function ftAssignToSlot(pid) {
       _ftRemplacants.push({
         player_id: displacedPid,
         card_id: card3 ? card3.id : null,
-        build_id: sq3 ? sq3.build_id : null,
+        build_id: resolveBuildId(displacedPid, card3 ? card3.id : null, sq3 ? sq3.build_id : null),
       });
     }
   }
@@ -1150,7 +1175,7 @@ function ftAssignToSlot(pid) {
     slot_idx: _ftSelectedSlot,
     player_id: pid,
     card_id: card ? card.id : null,
-    build_id: sq ? sq.build_id : null,
+    build_id: resolveBuildId(pid, card ? card.id : null, sq ? sq.build_id : null),
   };
 
   _ftSelectedSlot = null;
@@ -1171,7 +1196,7 @@ function ftAddToBench(pid) {
   var sq = _squad23.find(function(s) { return s.player_id === pid; });
   var cards = State.cards[pid] || [];
   var card = sq ? cards.find(function(c) { return c.id === sq.card_id; }) || cards[0] : cards[0];
-  _ftRemplacants.push({ player_id: pid, card_id: card ? card.id : null, build_id: sq ? sq.build_id : null });
+  _ftRemplacants.push({ player_id: pid, card_id: card ? card.id : null, build_id: resolveBuildId(pid, card ? card.id : null, sq ? sq.build_id : null) });
   ftSave();
   ftRefresh();
 }
@@ -4753,6 +4778,15 @@ function loadLineupFromStorage() {
   } catch(e) {}
 }
 
+function resolveBuildId(player_id, card_id, squad23BuildId) {
+  // Priorité 1 : build sélectionné dans le Squad 23
+  if (squad23BuildId) return squad23BuildId;
+  // Priorité 2 : build actif dans State (sélectionné dans l'effectif)
+  var builds = card_id ? (State.builds[card_id] || []) : [];
+  if (builds.length > 0) return builds[0].id; // premier build par défaut
+  return null;
+}
+
 function loadSquad23IntoLineup() {
   loadSquad23();
 
@@ -4784,7 +4818,7 @@ function loadSquad23IntoLineup() {
           }
         }
         var sq2 = _squad23.find(function(s) { return s.player_id === t.player_id; });
-        return { player_id: t.player_id, card_id: card_id, build_id: sq2 ? sq2.build_id : null };
+        return { player_id: t.player_id, card_id: card_id, build_id: resolveBuildId(t.player_id, card_id, sq2 ? sq2.build_id : null) };
       });
 
     _matchRemplacants = (ftData.remplacants || [])
@@ -4796,7 +4830,7 @@ function loadSquad23IntoLineup() {
           if (sq) card_id = sq.card_id;
         }
         var sq2 = _squad23.find(function(s) { return s.player_id === t.player_id; });
-        return { player_id: t.player_id, card_id: card_id, build_id: sq2 ? sq2.build_id : null };
+        return { player_id: t.player_id, card_id: card_id, build_id: resolveBuildId(t.player_id, card_id, sq2 ? sq2.build_id : null) };
       });
 
     // Pré-remplir la formation dans le modal match
@@ -4818,13 +4852,13 @@ function loadSquad23IntoLineup() {
       return allPids2.includes(s.player_id);
     }).map(function(sel) {
       var sq = _squad23.find(function(s) { return s.player_id === sel.player_id; });
-      return { player_id: sel.player_id, card_id: sel.card_id, build_id: sq ? sq.build_id : null };
+      return { player_id: sel.player_id, card_id: sel.card_id, build_id: resolveBuildId(sel.player_id, sel.card_id, sq ? sq.build_id : null) };
     });
     _matchRemplacants = (saved.remplacants || []).filter(function(s) {
       return allPids2.includes(s.player_id);
     }).map(function(sel) {
       var sq = _squad23.find(function(s) { return s.player_id === sel.player_id; });
-      return { player_id: sel.player_id, card_id: sel.card_id, build_id: sq ? sq.build_id : null };
+      return { player_id: sel.player_id, card_id: sel.card_id, build_id: resolveBuildId(sel.player_id, sel.card_id, sq ? sq.build_id : null) };
     });
   } else if (_squad23.length > 0) {
     _matchTitulaires = _squad23.slice(0, 11).map(function(s) {
@@ -5694,6 +5728,8 @@ function renderMatchTabMain() {
         '<div style="display:flex;gap:4px">' +
           '<input type="text" id="m-formation" class="form-input form-input-sm" placeholder="4-3-3" value="' + savedFormation + '" oninput="onFormationInput(this.value)" style="flex:1">' +
           '<button class="btn-sm btn-ghost" onclick="openFormationPicker()" title="Choisir formation" style="padding:4px 8px;flex-shrink:0"><i class="ti ti-ball-football"></i></button>' +
+          '<button class="btn-sm btn-ghost" onclick="matchLoadFormationFromFT()" title="Charger depuis onglet Formation" style="padding:4px 8px;flex-shrink:0"><i class="ti ti-download"></i></button>' +
+          '<button class="btn-sm btn-ghost" onclick="matchSaveFormationAsDefault()" title="Sauvegarder comme formation par défaut" style="padding:4px 8px;flex-shrink:0"><i class="ti ti-device-floppy"></i></button>' +
         '</div>' +
       '</div>' +
       '<div class="form-group" style="flex:1"><label>Formation adv.</label><input type="text" id="m-opp-formation" class="form-input form-input-sm" placeholder="4-4-2"></div>' +
@@ -5767,6 +5803,46 @@ function renderMatchTabMain() {
   rightCol += '</div>';
 
   return '<div class="match-main-layout">' + leftCol + '<div class="match-divider" id="match-divider" onmousedown="matchDividerStart(event)"></div>' + rightCol + '</div>';
+}
+
+function matchLoadFormationFromFT() {
+  // Charger la formation et la composition depuis l'onglet Formation
+  try {
+    var ftData = JSON.parse(localStorage.getItem(FT_STORAGE_KEY) || 'null');
+    if (!ftData || !ftData.formation) {
+      showToast('Aucune formation sauvegardée dans l' + String.fromCharCode(39) + 'onglet Formation', 'warning');
+      return;
+    }
+    // Appliquer la formation
+    var inp = document.getElementById('m-formation');
+    if (inp) { inp.value = ftData.formation; onFormationInput(ftData.formation); }
+    // Recharger la composition complète
+    loadSquad23IntoLineup();
+    refreshPitchStats();
+    saveMatchFormState();
+    saveMatchDraft();
+    showToast('Formation ' + ftData.formation + ' chargée !', 'success');
+  } catch(e) {
+    showToast('Erreur : ' + e.message, 'error');
+  }
+}
+
+function matchSaveFormationAsDefault() {
+  // Sauvegarder la formation et composition du match comme formation par défaut
+  var formation = document.getElementById('m-formation') ? document.getElementById('m-formation').value.trim() : _matchLastFormation;
+  if (!formation) { showToast('Aucune formation à sauvegarder', 'warning'); return; }
+  try {
+    var existing = JSON.parse(localStorage.getItem(FT_STORAGE_KEY) || '{}');
+    existing.formation = formation;
+    existing.titulaires = _matchTitulaires;
+    existing.remplacants = _matchRemplacants;
+    localStorage.setItem(FT_STORAGE_KEY, JSON.stringify(existing));
+    // Synchroniser aussi avec LINEUP_STORAGE_KEY
+    localStorage.setItem(LINEUP_STORAGE_KEY, JSON.stringify({ titulaires: _matchTitulaires, remplacants: _matchRemplacants }));
+    showToast('Formation ' + formation + ' sauvegardée comme défaut !', 'success');
+  } catch(e) {
+    showToast('Erreur : ' + e.message, 'error');
+  }
 }
 
 function onFormationInput(val) {
@@ -6288,11 +6364,14 @@ function openSwapPlayerPicker(slotIdx, btn) {
   title.textContent = 'Changer le titulaire';
   picker.appendChild(title);
 
+  // Seulement les remplaçants du match actuel
   var tituIds = _matchTitulaires.filter(function(t){ return t && t.player_id; }).map(function(t){ return t.player_id; });
-  var squad23Ids = _squad23.map(function(s){ return s.player_id; });
-  var priority = State.players.filter(function(p){ return squad23Ids.includes(p.id) && !tituIds.includes(p.id); });
-  var rest = State.players.filter(function(p){ return !squad23Ids.includes(p.id) && !tituIds.includes(p.id); });
-  var playerList = priority.concat(rest);
+  var playerList = _matchRemplacants
+    .filter(function(r){ return r && r.player_id && !tituIds.includes(r.player_id); })
+    .map(function(r){
+      return State.players.find(function(p){ return p.id === r.player_id; });
+    })
+    .filter(Boolean);
 
   if (playerList.length === 0) {
     var empty = document.createElement('div');
@@ -6311,8 +6390,19 @@ function openSwapPlayerPicker(slotIdx, btn) {
     b.onmouseenter = function() { b.style.background = 'var(--accent)'; b.style.color = '#fff'; };
     b.onmouseleave = function() { b.style.background = 'var(--surface3)'; b.style.color = 'var(--text)'; };
     b.onclick = function() {
+      // Joueur exclu → passe dans les remplaçants
+      var oldTitu = _matchTitulaires[slotIdx];
+      if (oldTitu && oldTitu.player_id) {
+        var oldInRemp = _matchRemplacants.some(function(r){ return r.player_id === oldTitu.player_id; });
+        if (!oldInRemp) {
+          _matchRemplacants.push({ player_id: oldTitu.player_id, card_id: oldTitu.card_id, build_id: oldTitu.build_id });
+        }
+      }
+      // Nouveau joueur → passe en titulaire
       var newCard = (State.cards[p.id] || [])[0];
-      _matchTitulaires[slotIdx] = { player_id: p.id, card_id: newCard ? newCard.id : null, build_id: null, slot_idx: slotIdx };
+      _matchTitulaires[slotIdx] = { player_id: p.id, card_id: newCard ? newCard.id : null, build_id: resolveBuildId(p.id, newCard ? newCard.id : null, null), slot_idx: slotIdx };
+      // Retirer le nouveau joueur des remplaçants
+      _matchRemplacants = _matchRemplacants.filter(function(r){ return r.player_id !== p.id; });
       if (!_matchPlayerStats[p.id]) _matchPlayerStats[p.id] = { goals:0, assists:0, saves:0, yellow_card:false, red_card:false, rating:0 };
       _pitchSelectedPid = p.id;
       picker.remove();
@@ -7331,47 +7421,56 @@ async function requestInstructionsIA() {
       return (i+1) + '. ' + name + ' [' + pos + '] style:' + style + ' — ' + playerMatches.length + ' matchs, ' + winRate + '% V, ' + goals + ' buts, ' + assists + ' passes, note:' + avgRating;
     }).join(nl);
 
-    var prompt = 'Tu es un expert eFootball Mobile. Propose les meilleures instructions individuelles pour ce match.' + nl + nl +
+    // Instructions gagnantes depuis l'historique
+    var instrWinRates = {};
+    try {
+      var instrStats = Analyse.byIndividualInstruction(filterStatsMatches(State.matches), State.players, State.cards);
+      if (instrStats && instrStats.length > 0) {
+        instrStats.slice(0, 5).forEach(function(s) {
+          instrWinRates[s.playerName + '+' + s.instruction] = s.winRate + '%';
+        });
+      }
+    } catch(e) {}
+    var instrHistorique = Object.entries(instrWinRates).map(function(e){ return e[0] + ': ' + e[1]; }).join(', ') || 'Aucune donnée';
+
+    var prompt = 'Tu es un expert eFootball Mobile. Propose les meilleures instructions individuelles pour ce match afin de maximiser les victoires.' + nl + nl +
       (activeCoach ? 'COACH: ' + activeCoach.name + ' · Style: ' + (activeCoach.style||'—') + ' · Formation: ' + (activeCoach.formation||formation||'—') + nl + nl : '') +
-      'TITULAIRES:' + nl + tituDetails + nl + nl +
-      'INSTRUCTIONS ATTACK disponibles: Off, Defensive, Attacking, Anchoring' + nl +
-      'INSTRUCTIONS DEFENCE disponibles: Off, Tight Marking, Man Marking, Counter Target, Deep Line' + nl + nl +
-      'RÈGLES:' + nl +
-      '- Attack 1 & 2 : choisir UNIQUEMENT parmi: Off, Defensive, Attacking, Anchoring' + nl +
-      '- Defence 1 & 2 : choisir UNIQUEMENT parmi: Off, Tight Marking, Man Marking, Counter Target, Deep Line' + nl +
-      '- ATTENTION: Counter Target est DEFENCE uniquement. Attacking/Defensive/Anchoring sont ATTACK uniquement.' + nl +
-      '- RÈGLES STRICTES PAR POSITION pour Attack 1 & 2:' + nl +
+      'TITULAIRES (stats de performance réelles):' + nl + tituDetails + nl + nl +
+      'INSTRUCTIONS GAGNANTES (historique — combinaisons joueur+instruction avec meilleur win rate): ' + instrHistorique + nl + nl +
+      'RÈGLES STRICTES:' + nl +
+      '- Attack 1 & 2 : UNIQUEMENT parmi: Off, Defensive, Attacking, Anchoring' + nl +
+      '- Defence 1 & 2 : UNIQUEMENT parmi: Off, Tight Marking, Man Marking, Counter Target, Deep Line' + nl +
+      '- ATTENTION: Counter Target = DEFENCE uniquement. Attacking/Defensive/Anchoring = ATTACK uniquement.' + nl +
+      '- RÈGLES PAR POSITION pour Attack:' + nl +
       '  * GK : Off uniquement' + nl +
-      '  * CB/LB/RB : Off ou Defensive uniquement' + nl +
+      '  * CB/LB/RB : Off ou Defensive' + nl +
       '  * DMF : Off, Defensive ou Anchoring' + nl +
       '  * CMF/LMF/RMF : Off, Defensive ou Attacking' + nl +
       '  * AMF : Off, Attacking ou Anchoring' + nl +
-      '  * LWF/RWF : Off ou Defensive (Attacking non applicable)' + nl +
-      '  * CF/SS : Off ou Defensive (Attacking non applicable)' + nl +
-      '- RÈGLES STRICTES PAR POSITION pour Defence 1 & 2:' + nl +
+      '  * LWF/RWF/CF/SS : Off ou Defensive (Attacking interdit)' + nl +
+      '- RÈGLES PAR POSITION pour Defence:' + nl +
       '  * GK : Off uniquement' + nl +
       '  * CB : Off, Tight Marking ou Man Marking' + nl +
       '  * LB/RB : Off, Tight Marking, Man Marking ou Counter Target' + nl +
       '  * DMF/CMF : Off, Tight Marking ou Man Marking' + nl +
       '  * AMF/LMF/RMF : Off, Man Marking ou Counter Target' + nl +
-      '  * LWF/RWF/CF/SS : Off ou Counter Target' + nl +
-      '- Adapte selon le style du coach et les stats des joueurs' + nl +
-      '- Attacking pour les joueurs offensifs avec beaucoup de buts/passes' + nl +
-      '- Defensive/Anchoring pour les milieux défensifs ou joueurs avec faible win rate' + nl +
-      '- Man Marking pour presser les joueurs dangereux adverses' + nl +
-      '- Counter Target pour les attaquants rapides en contre-attaque' + nl + nl +
-      '- Pour chaque instruction, le Targeted Player est le joueur de TON équipe qui exécutera ce rôle tactique' + nl +
-      '- Exemples: Man Marking → assigne au DMF ou CB qui va presser | Counter Target → assigne au CF ou LWF rapide | Attacking → assigne à l' + String.fromCharCode(39) + 'AMF ou CMF offensif | Anchoring → assigne au DMF défensif' + nl +
-      '- Le target doit être le nom exact du joueur tel qu' + String.fromCharCode(39) + 'il apparaît dans la liste des titulaires' + nl +
-      '- Si l' + String.fromCharCode(39) + 'instruction est Off, cela signifie aucune instruction assignée — le target DOIT être "" (vide, aucun joueur)' + nl +
-      '- Ne propose un target que si l' + String.fromCharCode(39) + 'instruction est différente de Off' + nl + nl +
+      '  * LWF/RWF/CF/SS : Off ou Counter Target' + nl + nl +
+      'LOGIQUE DE SÉLECTION:' + nl +
+      '- Priorité aux combinaisons gagnantes dans l' + String.fromCharCode(39) + 'historique' + nl +
+      '- Joueur avec beaucoup de buts → Counter Target (exploite sa vitesse en contre)' + nl +
+      '- Joueur avec beaucoup de passes → Attacking (libéré pour créer)' + nl +
+      '- Milieu défensif avec bon win rate → Anchoring (protège la défense)' + nl +
+      '- Quick Counter → Counter Target sur l' + String.fromCharCode(39) + 'attaquant le plus rapide' + nl +
+      '- Possession Game → Attacking sur le meneur de jeu' + nl + nl +
+      '- Le Targeted Player = le joueur de TON équipe qui exécute ce rôle' + nl +
+      '- Target vide ("") si instruction = Off' + nl + nl +
       'Réponds UNIQUEMENT avec un JSON valide sans texte avant ou après:' + nl +
       '{' + nl +
       '  "attack1":"Attacking", "attack1_target":"Bellingham",' + nl +
       '  "attack2":"Defensive", "attack2_target":"Valverde",' + nl +
       '  "defence1":"Man Marking", "defence1_target":"Tchouameni",' + nl +
       '  "defence2":"Counter Target", "defence2_target":"Mbappe",' + nl +
-      '  "justification":"Explication courte"' + nl +
+      '  "justification":"Explication citant les stats des joueurs et l' + String.fromCharCode(39) + 'historique gagnant"' + nl +
       '}';
 
     var data = await fetchCoachingWithRetry({ model: 'claude-sonnet-4-6', max_tokens: 600, messages: [{ role: 'user', content: prompt }] });
@@ -7824,8 +7923,10 @@ function addTrendingToSquad23(cardId) {
     return;
   }
 
-  _squad23.push({ player_id: pid, card_id: cardId, build_id: null });
+  var newEntry3 = { player_id: pid, card_id: cardId, build_id: resolveBuildId(pid, cardId, null) };
+  _squad23.push(newEntry3);
   saveSquad23();
+  syncNewPlayerToLineups(newEntry3);
   render();
 }
 
@@ -7858,8 +7959,10 @@ function addBuildToSquad23(buildId) {
   }
 
   // Ajouter le joueur avec ce build
-  _squad23.push({ player_id: pid, card_id: card.id, build_id: buildId });
+  var newEntry = { player_id: pid, card_id: card.id, build_id: buildId };
+  _squad23.push(newEntry);
   saveSquad23();
+  syncNewPlayerToLineups(newEntry);
 
   // Feedback visuel
   var btn = document.getElementById('squad-btn-' + buildId);
@@ -7876,22 +7979,162 @@ function addToSquad23(val) {
   var pid = parts[0]; var cid = parts[1];
   var builds = State.builds[cid] || [];
   var defaultBuild = builds.length > 0 ? builds[0].id : null;
-  _squad23.push({ player_id: pid, card_id: cid, build_id: defaultBuild });
+  var newEntry2 = { player_id: pid, card_id: cid, build_id: defaultBuild };
+  _squad23.push(newEntry2);
   saveSquad23();
+  syncNewPlayerToLineups(newEntry2);
   // Re-render la section
   var el = document.getElementById('squad23-container');
   if (el) el.innerHTML = renderSquad23Section();
 }
 
+function syncNewPlayerToLineups(entry) {
+  if (!entry || !entry.player_id) return;
+  var pid = entry.player_id;
+  var resolvedBuild = resolveBuildId(pid, entry.card_id, entry.build_id);
+  var newTitu = { player_id: pid, card_id: entry.card_id, build_id: resolvedBuild };
+
+  // Charger la formation depuis localStorage si nécessaire
+  try {
+    var ftData = JSON.parse(localStorage.getItem(FT_STORAGE_KEY) || 'null');
+    if (ftData) {
+      if (!_ftTitulaires || _ftTitulaires.length === 0) _ftTitulaires = ftData.titulaires || [];
+      if (!_ftRemplacants || _ftRemplacants.length === 0) _ftRemplacants = ftData.remplacants || [];
+    }
+  } catch(e) {}
+
+  // Trouver les slots vides dans _ftTitulaires
+  var emptyFtSlots = _ftTitulaires.map(function(t, i){ return (!t || !t.player_id) ? i : -1; }).filter(function(i){ return i >= 0; });
+
+  if (emptyFtSlots.length > 0) {
+    // Prendre un slot vide au hasard si plusieurs, sinon le seul disponible
+    var slotIdx = emptyFtSlots[Math.floor(Math.random() * emptyFtSlots.length)];
+    _ftTitulaires[slotIdx] = Object.assign({ slot_idx: slotIdx }, newTitu);
+    ftSave();
+  } else {
+    // Pas de slot vide → mettre au banc
+    var inFt = _ftRemplacants.some(function(r){ return r && r.player_id === pid; });
+    if (!inFt) { _ftRemplacants.push(newTitu); ftSave(); }
+  }
+
+  // Même logique pour le modal match
+  var emptyMatchSlots = _matchTitulaires.map(function(t, i){ return (!t || !t.player_id) ? i : -1; }).filter(function(i){ return i >= 0; });
+
+  if (emptyMatchSlots.length > 0) {
+    var matchSlotIdx = emptyMatchSlots[Math.floor(Math.random() * emptyMatchSlots.length)];
+    _matchTitulaires[matchSlotIdx] = Object.assign({ slot_idx: matchSlotIdx }, newTitu);
+    if (!_matchPlayerStats[pid]) _matchPlayerStats[pid] = { goals:0, assists:0, saves:0, yellow_card:false, red_card:false, rating:0 };
+    saveMatchDraft();
+    var pitchCol = document.querySelector('.match-pitch-col');
+    if (pitchCol) refreshPitchStats();
+  } else {
+    var inMatch = _matchTitulaires.some(function(t){ return t && t.player_id === pid; }) ||
+                  _matchRemplacants.some(function(r){ return r && r.player_id === pid; });
+    if (!inMatch) {
+      _matchRemplacants.push(newTitu);
+      saveMatchDraft();
+    }
+  }
+
+  // Persister dans LINEUP_STORAGE_KEY
+  try {
+    var lineup = JSON.parse(localStorage.getItem(LINEUP_STORAGE_KEY) || '{}');
+    lineup.titulaires = _matchTitulaires;
+    lineup.remplacants = _matchRemplacants;
+    localStorage.setItem(LINEUP_STORAGE_KEY, JSON.stringify(lineup));
+  } catch(e) {}
+}
+
 function removeFromSquad23(idx) {
+  var removed = _squad23[idx];
   _squad23.splice(idx, 1);
   saveSquad23();
+
+  if (removed && removed.player_id) {
+    var pid = removed.player_id;
+
+    // Retirer de _ftTitulaires → slot vide
+    _ftTitulaires.forEach(function(t, i) {
+      if (t && t.player_id === pid) _ftTitulaires[i] = { slot_idx: i, player_id: null };
+    });
+    // Retirer de _ftRemplacants
+    _ftRemplacants = _ftRemplacants.filter(function(r) { return r && r.player_id !== pid; });
+    ftSave();
+
+    // Retirer de _matchTitulaires → slot vide
+    _matchTitulaires.forEach(function(t, i) {
+      if (t && t.player_id === pid) _matchTitulaires[i] = null;
+    });
+    // Retirer de _matchRemplacants
+    _matchRemplacants = _matchRemplacants.filter(function(r) { return r && r.player_id !== pid; });
+    saveMatchDraft();
+
+    // Nettoyer LINEUP_STORAGE_KEY
+    try {
+      var lineup = JSON.parse(localStorage.getItem(LINEUP_STORAGE_KEY) || '{}');
+      if (lineup.titulaires) lineup.titulaires = lineup.titulaires.map(function(t) {
+        return (t && t.player_id === pid) ? null : t;
+      });
+      if (lineup.remplacants) lineup.remplacants = lineup.remplacants.filter(function(r) {
+        return r && r.player_id !== pid;
+      });
+      localStorage.setItem(LINEUP_STORAGE_KEY, JSON.stringify(lineup));
+    } catch(e) {}
+  }
+
   var el = document.getElementById('squad23-container');
   if (el) el.innerHTML = renderSquad23Section();
 }
 
 function updateSquad23Build(idx, buildId) {
-  if (_squad23[idx]) { _squad23[idx].build_id = buildId || null; saveSquad23(); }
+  if (!_squad23[idx]) return;
+  _squad23[idx].build_id = buildId || null;
+  saveSquad23();
+
+  // Mettre à jour le build dans _ftTitulaires si ce joueur est titulaire
+  var pid = _squad23[idx].player_id;
+  var cardId = _squad23[idx].card_id;
+  var resolvedBuild = resolveBuildId(pid, cardId, buildId || null);
+
+  // Sync modal Formation
+  var ftTitu = _ftTitulaires.findIndex(function(t){ return t && t.player_id === pid; });
+  if (ftTitu >= 0) {
+    _ftTitulaires[ftTitu].build_id = resolvedBuild;
+    ftSave();
+  }
+  var ftRemp = _ftRemplacants.findIndex(function(r){ return r && r.player_id === pid; });
+  if (ftRemp >= 0) {
+    _ftRemplacants[ftRemp].build_id = resolvedBuild;
+    ftSave();
+  }
+
+  // Sync modal Match si ouvert
+  var matchTitu = _matchTitulaires.findIndex(function(t){ return t && t.player_id === pid; });
+  if (matchTitu >= 0) {
+    _matchTitulaires[matchTitu].build_id = resolvedBuild;
+    saveMatchDraft();
+  }
+  var matchRemp = _matchRemplacants.findIndex(function(r){ return r && r.player_id === pid; });
+  if (matchRemp >= 0) {
+    _matchRemplacants[matchRemp].build_id = resolvedBuild;
+    saveMatchDraft();
+  }
+
+  // Sync LINEUP_STORAGE_KEY pour le prochain chargement
+  try {
+    var lineup = JSON.parse(localStorage.getItem(LINEUP_STORAGE_KEY) || '{}');
+    if (lineup.titulaires) {
+      lineup.titulaires.forEach(function(t) {
+        if (t && t.player_id === pid) t.build_id = resolvedBuild;
+      });
+    }
+    if (lineup.remplacants) {
+      lineup.remplacants.forEach(function(r) {
+        if (r && r.player_id === pid) r.build_id = resolvedBuild;
+      });
+    }
+    localStorage.setItem(LINEUP_STORAGE_KEY, JSON.stringify(lineup));
+  } catch(e) {}
 }
 
 function clearSquad23() {
@@ -8586,12 +8829,19 @@ function renderSaisonContent() {
   if (_saisonTab === 'resume') {
     var bestMatch = matches.filter(function(m){return m.result==='V';}).sort(function(a,b){return (b.score_for-b.score_against)-(a.score_for-a.score_against);})[0];
     var worstMatch = matches.filter(function(m){return m.result==='D';}).sort(function(a,b){return (a.score_for-a.score_against)-(b.score_for-b.score_against);})[0];
+    // Calcul clean sheets équipe
+    var csCount = matches.filter(function(m){ return m.result === 'V' && (m.score_against === 0 || m.score_against === '0'); }).length;
+    var csCountAll = matches.filter(function(m){ return m.score_against === 0 || m.score_against === '0'; }).length;
+    var csRate = gs.total > 0 ? Math.round(csCountAll / gs.total * 100) : 0;
+
     var html = '<div style="display:flex;flex-direction:column;gap:12px">';
     html += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">';
     html += '<div style="background:var(--surface2);border-radius:10px;padding:14px;text-align:center;border-left:3px solid #34d399"><div style="font-size:24px;font-weight:800;color:#34d399">' + gs.winRate + '%</div><div style="font-size:11px;color:var(--muted)">Taux de victoire</div><div style="font-size:11px;color:var(--muted)">' + gs.wins + 'V · ' + gs.draws + 'N · ' + gs.losses + 'D</div></div>';
     html += '<div style="background:var(--surface2);border-radius:10px;padding:14px;text-align:center;border-left:3px solid #a78bfa"><div style="font-size:24px;font-weight:800;color:#a78bfa">' + serie.record + '</div><div style="font-size:11px;color:var(--muted)">Série record</div><div style="font-size:11px;color:var(--muted)">Actuelle : ' + serie.current + '</div></div>';
     html += '<div style="background:var(--surface2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:800">' + gs.goalsFor + '</div><div style="font-size:11px;color:var(--muted)">Buts marqués</div><div style="font-size:11px;color:var(--muted)">' + (gs.total > 0 ? (gs.goalsFor/gs.total).toFixed(1) : 0) + '/match</div></div>';
     html += '<div style="background:var(--surface2);border-radius:10px;padding:14px;text-align:center"><div style="font-size:24px;font-weight:800">' + gs.total + '</div><div style="font-size:11px;color:var(--muted)">Matchs joués</div><div style="font-size:11px;color:var(--muted)">' + gs.goalsAgainst + ' buts enc.</div></div>';
+    html += '<div style="background:var(--surface2);border-radius:10px;padding:14px;text-align:center;border-left:3px solid #2dd4bf"><div style="font-size:24px;font-weight:800;color:#2dd4bf">' + csCountAll + '</div><div style="font-size:11px;color:var(--muted)">Clean Sheets</div><div style="font-size:11px;color:var(--muted)">' + csRate + '% des matchs</div></div>';
+    html += '<div style="background:var(--surface2);border-radius:10px;padding:14px;text-align:center;border-left:3px solid #f59e0b"><div style="font-size:24px;font-weight:800;color:#f59e0b">' + csCount + '</div><div style="font-size:11px;color:var(--muted)">CS en victoire</div><div style="font-size:11px;color:var(--muted)">' + (gs.wins > 0 ? Math.round(csCount/gs.wins*100) : 0) + '% des victoires</div></div>';
     html += '</div>';
     if (bestMatch) html += '<div style="background:var(--surface2);border-radius:10px;padding:12px;border-left:3px solid #34d399"><div style="font-size:10px;color:var(--muted);margin-bottom:4px">🏅 Meilleur match</div><div style="font-size:14px;font-weight:700">' + (bestMatch.score_for||0) + ' – ' + (bestMatch.score_against||0) + ' <span style="font-size:12px;color:var(--muted)">vs ' + (bestMatch.opp_name||'?') + '</span></div></div>';
     if (worstMatch) html += '<div style="background:var(--surface2);border-radius:10px;padding:12px;border-left:3px solid #f87171"><div style="font-size:10px;color:var(--muted);margin-bottom:4px">💔 Match le plus difficile</div><div style="font-size:14px;font-weight:700">' + (worstMatch.score_for||0) + ' – ' + (worstMatch.score_against||0) + ' <span style="font-size:12px;color:var(--muted)">vs ' + (worstMatch.opp_name||'?') + '</span></div></div>';
