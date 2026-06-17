@@ -441,6 +441,35 @@ function ftSave() {
 
 // ── Formation IA ──────────────────────────────────────────────────────────────
 var _formationIALoading = false;
+
+// ── Fetch avec retry automatique pour les appels Claude ──────────────────────
+async function fetchCoachingWithRetry(body, maxRetries) {
+  maxRetries = maxRetries || 2;
+  var lastError = null;
+  for (var attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      var response = await fetch(EFB_CONFIG.supabaseUrl + '/functions/v1/coaching', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + EFB_CONFIG.supabaseKey,
+        },
+        body: JSON.stringify(body)
+      });
+      if (!response.ok) {
+        throw new Error('HTTP ' + response.status);
+      }
+      return await response.json();
+    } catch(e) {
+      lastError = e;
+      if (attempt < maxRetries) {
+        // Attendre 1.5s avant de réessayer
+        await new Promise(function(resolve) { setTimeout(resolve, 1500); });
+      }
+    }
+  }
+  throw lastError;
+}
 var FT_IA_ANALYSIS_KEY = 'efb_ft_ia_analysis';
 
 function renderFtIAPanel(data) {
@@ -655,20 +684,7 @@ async function requestFormationIA() {
       '- slot_idx va de 0 à 10, chaque slot correspond à une position fixe définie dans POSITIONS PAR FORMATION.' + nl +
       '- Les instructions_match doivent être précises et actionnables, pas génériques.';
 
-    var response = await fetch(EFB_CONFIG.supabaseUrl + '/functions/v1/coaching', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + EFB_CONFIG.supabaseKey,
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1800,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-
-    var data = await response.json();
+    var data = await fetchCoachingWithRetry({ model: 'claude-sonnet-4-6', max_tokens: 1800, messages: [{ role: 'user', content: prompt }] });
     var text = (data.content || []).map(function(b){ return b.text||''; }).join('');
 
     // Parser JSON
@@ -2146,20 +2162,7 @@ async function sendBuildIAChat(playerId, cardId) {
   }
 
   try {
-    var response = await fetch(EFB_CONFIG.supabaseUrl + '/functions/v1/coaching', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + EFB_CONFIG.supabaseKey,
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 600,
-        messages: messages
-      })
-    });
-
-    var data = await response.json();
+    var data = await fetchCoachingWithRetry({ model: 'claude-sonnet-4-6', max_tokens: 600, messages: messages });
     var reply = (data.content || []).map(function(b){ return b.text||''; }).join('');
 
     // Détecter si Claude propose un nouveau build dans <build>...</build>
@@ -2231,13 +2234,7 @@ async function requestBuildIA(playerId, cardId) {
       return m.player_stats && m.player_stats.some(function(ps) { return ps.player_id === playerId; });
     });
 
-    if (playerMatches.length < 3) {
-      _buildIAResult = { error: 'Pas assez de données — ce joueur doit avoir au moins 3 matchs.' };
-      _buildIALoading = false;
-      var elErr = document.getElementById('build-ia-result');
-      if (elErr) elErr.innerHTML = '<div style="color:var(--red);font-size:13px;padding:12px">' + _buildIAResult.error + '</div>';
-      return;
-    }
+    var hasMatchData = playerMatches.length >= 3;
 
     // Builds existants avec stats
     var builds = (State.builds[cardId] || []).map(function(b) {
@@ -2308,7 +2305,9 @@ async function requestBuildIA(playerId, cardId) {
       priorityRules2 + nl +
       'JOUEUR: ' + player.name + ' · Position: ' + pos + ' · Level cap: ' + (card.level_cap || '—') + ' · Carte: ' + (card.card_type || '—') + nl +
       'Style de jeu: ' + (card.efhub_stats.playingStyle || '—') + nl + nl +
-      'PERFORMANCE: ' + playerMatches.length + ' matchs · ' + winRate + '% victoires · Note moy: ' + avgRating + '/10 · ' + goals + ' buts · ' + assists + ' passes' + nl + nl +
+      (!hasMatchData
+        ? 'PERFORMANCE: ' + playerMatches.length + ' match(s) — nouveau joueur, propose un build optimal basé uniquement sur ses stats et son style de jeu.' + nl + nl
+        : 'PERFORMANCE: ' + playerMatches.length + ' matchs · ' + winRate + '% victoires · Note moy: ' + avgRating + '/10 · ' + goals + ' buts · ' + assists + ' passes' + nl + nl) +
       (activeCoach ? 'COACH ACTIF: ' + activeCoach.name + ' · Style: ' + (activeCoach.style || '—') + ' · Formation: ' + (activeCoach.formation || '—') + nl + nl : '') +
       'BUILDS EXISTANTS:' + nl + (builds.length > 0 ? builds.join(nl) : 'Aucun build') + nl + nl +
       'SLIDERS DISPONIBLES (stats actuelles + projections):' + nl + sliderDetails.join(nl) + nl + nl +
@@ -2328,20 +2327,7 @@ async function requestBuildIA(playerId, cardId) {
       '2. Additionne tous ces couts. Le total DOIT etre exactement ' + pointsMax + ' pts.' + nl +
       '3. Si le total est inferieur a ' + pointsMax + ' pts, ajoute des clics sur les sliders les plus utiles pour ce joueur jusqu\' a atteindre exactement ' + pointsMax + ' pts.';
 
-    var response = await fetch(EFB_CONFIG.supabaseUrl + '/functions/v1/coaching', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + EFB_CONFIG.supabaseKey,
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-
-    var data = await response.json();
+    var data = await fetchCoachingWithRetry({ model: 'claude-sonnet-4-6', max_tokens: 1000, messages: [{ role: 'user', content: prompt }] });
     var text = (data.content || []).map(function(b) { return b.text || ''; }).join('');
 
     // Parser le JSON retourné par Claude
@@ -3401,20 +3387,7 @@ async function generateCoaching() {
 
     const prompt = buildCoachingPrompt(coachingData);
 
-    const response = await fetch(EFB_CONFIG.supabaseUrl + '/functions/v1/coaching', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + EFB_CONFIG.supabaseKey,
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1000,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-
-    const data = await response.json();
+    const data = await fetchCoachingWithRetry({ model: 'claude-sonnet-4-6', max_tokens: 1000, messages: [{ role: 'user', content: prompt }] });
     const text = data.content?.map(b => b.text || '').join('') || '';
     _coachingResult = { text };
 
@@ -7324,13 +7297,7 @@ async function requestInstructionsIA() {
       '  "justification":"Explication courte"' + nl +
       '}';
 
-    var response = await fetch(EFB_CONFIG.supabaseUrl + '/functions/v1/coaching', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + EFB_CONFIG.supabaseKey },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 600, messages: [{ role: 'user', content: prompt }] })
-    });
-
-    var data = await response.json();
+    var data = await fetchCoachingWithRetry({ model: 'claude-sonnet-4-6', max_tokens: 600, messages: [{ role: 'user', content: prompt }] });
     var text = (data.content || []).map(function(b){ return b.text||''; }).join('');
 
     // Parser JSON
