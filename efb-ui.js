@@ -6007,7 +6007,9 @@ function openQuickStatPopup(outPid, activePid, slotIdx, cx, cy) {
 
   var player = State.players.find(function(p){ return p.id === activePid; });
   if (!player) return;
-  var st = _matchPlayerStats[activePid] || { goals:0, assists:0, saves:0, rating:0 };
+  // S'assurer que les stats sont initialisées
+  if (!_matchPlayerStats[activePid]) _matchPlayerStats[activePid] = { goals:0, assists:0, saves:0, yellow_card:false, red_card:false, rating:0 };
+  var st = _matchPlayerStats[activePid];
   var titu = _matchTitulaires[slotIdx];
   var card = titu && titu.card_id ? (State.cards[titu.player_id] || []).find(function(c){ return c.id === titu.card_id; }) : null;
   var pos = card ? (card.efhub_stats && card.efhub_stats.position || '') : '';
@@ -6054,18 +6056,18 @@ function openQuickStatPopup(outPid, activePid, slotIdx, cx, cy) {
   if(isGK){
     h+='<div style="flex:1;text-align:center"><div style="font-size:10px;color:var(--muted)">🧤 Arrêts</div><div style="display:flex;align-items:center;justify-content:center;gap:6px">';
     h+='<button onclick="updateMatchStat('+q+activePid+q+','+q+'saves'+q+',-1)" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px">−</button>';
-    h+='<span style="font-weight:700;min-width:20px;text-align:center;font-size:16px">'+(st.saves||0)+'</span>';
+    h+='<span id="qsp-saves-'+activePid+'" style="font-weight:700;min-width:20px;text-align:center;font-size:16px">'+(st.saves||0)+'</span>';
     h+='<button onclick="updateMatchStat('+q+activePid+q+','+q+'saves'+q+',1)" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px">+</button>';
     h+='</div></div>';
   } else {
     h+='<div style="flex:1;text-align:center"><div style="font-size:10px;color:var(--muted)">⚽ Buts</div><div style="display:flex;align-items:center;justify-content:center;gap:6px">';
     h+='<button onclick="updateMatchStat('+q+activePid+q+','+q+'goals'+q+',-1)" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px">−</button>';
-    h+='<span style="font-weight:700;min-width:20px;text-align:center;font-size:16px">'+(st.goals||0)+'</span>';
+    h+='<span id="qsp-goals-'+activePid+'" style="font-weight:700;min-width:20px;text-align:center;font-size:16px">'+(st.goals||0)+'</span>';
     h+='<button onclick="updateMatchStat('+q+activePid+q+','+q+'goals'+q+',1)" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px">+</button>';
     h+='</div></div>';
     h+='<div style="flex:1;text-align:center"><div style="font-size:10px;color:var(--muted)">🎯 Passes</div><div style="display:flex;align-items:center;justify-content:center;gap:6px">';
     h+='<button onclick="updateMatchStat('+q+activePid+q+','+q+'assists'+q+',-1)" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px">−</button>';
-    h+='<span style="font-weight:700;min-width:20px;text-align:center;font-size:16px">'+(st.assists||0)+'</span>';
+    h+='<span id="qsp-assists-'+activePid+'" style="font-weight:700;min-width:20px;text-align:center;font-size:16px">'+(st.assists||0)+'</span>';
     h+='<button onclick="updateMatchStat('+q+activePid+q+','+q+'assists'+q+',1)" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px">+</button>';
     h+='</div></div>';
   }
@@ -7218,9 +7220,17 @@ function updateMatchStat(pid, stat, delta) {
   // Mettre à jour le tableau général
   const el = document.getElementById('mps-' + stat + '-' + pid);
   if (el) el.textContent = _matchPlayerStats[pid][stat];
-  // Mettre à jour le popup rapide si ouvert
+  // Mettre à jour le popup rapide si ouvert pour ce joueur
   var qspEl = document.getElementById('qsp-' + stat + '-' + pid);
   if (qspEl) qspEl.textContent = _matchPlayerStats[pid][stat];
+  // Si le popup est ouvert pour un autre stat du même joueur, rafraîchir tous les compteurs
+  var popup = document.getElementById('quick-stat-popup');
+  if (popup && popup._activePid === pid) {
+    ['goals','assists','saves'].forEach(function(s) {
+      var el2 = document.getElementById('qsp-' + s + '-' + pid);
+      if (el2) el2.textContent = _matchPlayerStats[pid][s] || 0;
+    });
+  }
   // Mettre à jour le score automatiquement quand un but est marqué
   if (stat === 'goals') {
     var scoreEl = document.getElementById('m-score-for');
