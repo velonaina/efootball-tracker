@@ -5915,7 +5915,7 @@ function renderPitchSVG(slots, formation) {
     var stroke = sub ? '#34d399' : (isSelected ? '#f59e0b' : (hasStats ? '#a78bfa' : '#60a5fa'));
     var strokeW = isSelected ? 2.5 : 1.5;
 
-    var nodeHtml = '<g class="match-pitch-node" data-slot="' + i + '" onclick="onPitchPlayerClick(' + q + titu.player_id + q + ',' + q + activePid + q + ',' + i + ')" style="cursor:pointer">';
+    var nodeHtml = '<g class="match-pitch-node" data-slot="' + i + '" onclick="openQuickStatPopup(' + q + titu.player_id + q + ',' + q + activePid + q + ',' + i + ',' + cx + ',' + cy + ')" style="cursor:pointer">';
     if (swapMode) {
       nodeHtml += '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r+4) + '" fill="none" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2" opacity="0.6"/>';
     }
@@ -6001,6 +6001,151 @@ function renderPitchSVG(slots, formation) {
 }
 
 // ── Clic sur un joueur du terrain ─────────────────────────────────────────────
+function openQuickStatPopup(outPid, activePid, slotIdx, cx, cy) {
+  var existing = document.getElementById('quick-stat-popup');
+  if (existing) { existing.remove(); if (existing._activePid === activePid) return; }
+
+  var player = State.players.find(function(p){ return p.id === activePid; });
+  if (!player) return;
+  var st = _matchPlayerStats[activePid] || { goals:0, assists:0, saves:0, rating:0 };
+  var titu = _matchTitulaires[slotIdx];
+  var card = titu && titu.card_id ? (State.cards[titu.player_id] || []).find(function(c){ return c.id === titu.card_id; }) : null;
+  var pos = card ? (card.efhub_stats && card.efhub_stats.position || '') : '';
+  var isGK = pos === 'GK';
+  var isSub = !!_matchSubs.find(function(s){ return s.out_player_id === outPid; });
+  var q = String.fromCharCode(39);
+
+  var posCompatible = {
+    'GK':['GK'],'CB':['CB','LB','RB','DMF'],'LB':['LB','RB','CB','LMF'],'RB':['RB','LB','CB','RMF'],
+    'DMF':['DMF','CMF','CB'],'CMF':['CMF','DMF','AMF'],'AMF':['AMF','CMF','LMF','RMF'],
+    'LMF':['LMF','AMF','LWF'],'RMF':['RMF','AMF','RWF'],'LWF':['LWF','LMF','CF','SS'],
+    'RWF':['RWF','RMF','CF','SS'],'CF':['CF','SS','LWF','RWF'],'SS':['SS','CF','AMF']
+  };
+  var compatible = posCompatible[pos] || [];
+  var tituIds = _matchTitulaires.filter(function(t){ return t && t.player_id; }).map(function(t){ return t.player_id; });
+  var remps = _matchRemplacants.filter(function(r){ return r && r.player_id && !tituIds.includes(r.player_id); });
+  var rempsSorted = remps.slice().sort(function(a,b){
+    var cA=(State.cards[a.player_id]||[])[0]; var cB=(State.cards[b.player_id]||[])[0];
+    var pA=cA?(cA.efhub_stats&&cA.efhub_stats.position||''):''; var pB=cB?(cB.efhub_stats&&cB.efhub_stats.position||''):'';
+    return (compatible.includes(pA)?0:1)-(compatible.includes(pB)?0:1);
+  });
+
+  var row1=[4,4.5,5,5.5,6,6.5]; var row2=[7,7.5,8,8.5,9,9.5,10];
+  var popup=document.createElement('div');
+  popup.id='quick-stat-popup'; popup._activePid=activePid;
+  popup.style.cssText='position:fixed;z-index:200000;background:var(--surface);border:1px solid var(--accent);border-radius:10px;padding:10px;box-shadow:0 6px 24px rgba(0,0,0,0.7);min-width:220px;font-size:12px';
+
+  var svgEl=document.querySelector('.match-pitch-svg');
+  if(svgEl){
+    var sr=svgEl.getBoundingClientRect();
+    var px=sr.left+cx*(sr.width/180); var py=sr.top+cy*(sr.height/290);
+    popup.style.left=Math.min(Math.max(px-110,8),window.innerWidth-240)+'px';
+    popup.style.top=Math.min(py+20,window.innerHeight-300)+'px';
+  } else { popup.style.left='50%'; popup.style.top='50%'; popup.style.transform='translate(-50%,-50%)'; }
+
+  var h='';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+  h+='<span style="font-weight:700;color:var(--text)">'+player.name+'</span>';
+  h+='<span style="font-size:10px;color:var(--muted)">'+pos+(isSub?' ⇄':'')+'</span>';
+  h+='<button onclick="document.getElementById('+q+'quick-stat-popup'+q+').remove()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:0 0 0 8px">✕</button>';
+  h+='</div>';
+
+  h+='<div style="display:flex;gap:8px;margin-bottom:8px">';
+  if(isGK){
+    h+='<div style="flex:1;text-align:center"><div style="font-size:10px;color:var(--muted)">🧤 Arrêts</div><div style="display:flex;align-items:center;justify-content:center;gap:6px">';
+    h+='<button onclick="updateMatchStat('+q+activePid+q+','+q+'saves'+q+',-1)" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px">−</button>';
+    h+='<span style="font-weight:700;min-width:20px;text-align:center;font-size:16px">'+(st.saves||0)+'</span>';
+    h+='<button onclick="updateMatchStat('+q+activePid+q+','+q+'saves'+q+',1)" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px">+</button>';
+    h+='</div></div>';
+  } else {
+    h+='<div style="flex:1;text-align:center"><div style="font-size:10px;color:var(--muted)">⚽ Buts</div><div style="display:flex;align-items:center;justify-content:center;gap:6px">';
+    h+='<button onclick="updateMatchStat('+q+activePid+q+','+q+'goals'+q+',-1)" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px">−</button>';
+    h+='<span style="font-weight:700;min-width:20px;text-align:center;font-size:16px">'+(st.goals||0)+'</span>';
+    h+='<button onclick="updateMatchStat('+q+activePid+q+','+q+'goals'+q+',1)" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px">+</button>';
+    h+='</div></div>';
+    h+='<div style="flex:1;text-align:center"><div style="font-size:10px;color:var(--muted)">🎯 Passes</div><div style="display:flex;align-items:center;justify-content:center;gap:6px">';
+    h+='<button onclick="updateMatchStat('+q+activePid+q+','+q+'assists'+q+',-1)" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px">−</button>';
+    h+='<span style="font-weight:700;min-width:20px;text-align:center;font-size:16px">'+(st.assists||0)+'</span>';
+    h+='<button onclick="updateMatchStat('+q+activePid+q+','+q+'assists'+q+',1)" style="width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px">+</button>';
+    h+='</div></div>';
+  }
+  h+='</div>';
+
+  h+='<div style="font-size:10px;color:var(--muted);margin-bottom:4px">⭐ Note</div>';
+  var cr=st.rating||0;
+  [row1,row2].forEach(function(row){
+    h+='<div style="display:flex;gap:3px;margin-bottom:3px">';
+    row.forEach(function(n){
+      var a=cr===n;
+      h+='<button onclick="quickSetRating('+q+activePid+q+','+n+')" style="flex:1;padding:3px 0;border-radius:4px;border:1px solid '+(a?'var(--accent)':'var(--border)')+';background:'+(a?'var(--accent)':'var(--surface2)')+';color:'+(a?'#fff':'var(--text)')+';cursor:pointer;font-size:10px;font-weight:'+(a?'700':'400')+'" id="qsp-note-'+activePid+'-'+(n+'').replace('.','_')+'">'+n+'</button>';
+    });
+    h+='</div>';
+  });
+
+  if(!isSub){
+    h+='<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px">';
+    h+='<div style="font-size:10px;color:var(--muted);margin-bottom:4px">🔄 Remplacer par</div>';
+    if(rempsSorted.length===0){
+      h+='<div style="font-size:11px;color:var(--muted)">Aucun remplaçant disponible</div>';
+    } else {
+      h+='<div style="max-height:100px;overflow-y:auto;display:flex;flex-direction:column;gap:3px">';
+      rempsSorted.forEach(function(r){
+        var rp=State.players.find(function(p){return p.id===r.player_id;});
+        var rc=(State.cards[r.player_id]||[])[0];
+        var rpos=rc?(rc.efhub_stats&&rc.efhub_stats.position||''):'';
+        if(!rp)return;
+        var isC=compatible.includes(rpos);
+        h+='<button onclick="quickSub('+q+outPid+q+','+q+r.player_id+q+','+slotIdx+')" style="padding:4px 8px;border-radius:5px;border:1px solid '+(isC?'var(--accent)':'var(--border)')+';background:var(--surface2);color:var(--text);cursor:pointer;text-align:left;font-size:11px;display:flex;gap:6px">';
+        h+='<span style="color:var(--muted);font-size:10px;min-width:28px">'+rpos+'</span>'+rp.name+'</button>';
+      });
+      h+='</div>';
+      h+='<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:6px">';
+      [45,50,55,60,65,70,75,80,85,90].forEach(function(m){
+        h+='<button onclick="quickSetSubMinute('+m+')" id="qsp-min-'+m+'" style="flex:1;min-width:28px;padding:3px 0;border-radius:4px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer;font-size:10px">'+m+String.fromCharCode(39)+'</button>';
+      });
+      h+='</div>';
+    }
+    h+='</div>';
+  }
+
+  popup.innerHTML=h;
+  document.body.appendChild(popup);
+  setTimeout(function(){
+    document.addEventListener('mousedown',function cp(e){
+      var p=document.getElementById('quick-stat-popup');
+      if(p&&!p.contains(e.target)){p.remove();document.removeEventListener('mousedown',cp);}
+    });
+  },100);
+}
+
+var _quickSubMinute=60;
+function quickSetSubMinute(min){
+  _quickSubMinute=min;
+  [45,50,55,60,65,70,75,80,85,90].forEach(function(m){
+    var b=document.getElementById('qsp-min-'+m);
+    if(b){b.style.background=m===min?'var(--accent)':'var(--surface2)';b.style.color=m===min?'#fff':'var(--muted)';}
+  });
+}
+
+function quickSetRating(pid,val){
+  if(!_matchPlayerStats[pid])_matchPlayerStats[pid]={goals:0,assists:0,saves:0,yellow_card:false,red_card:false,rating:0};
+  _matchPlayerStats[pid].rating=_matchPlayerStats[pid].rating===val?0:val;
+  saveMatchDraft();
+  [4,4.5,5,5.5,6,6.5,7,7.5,8,8.5,9,9.5,10].forEach(function(n){
+    var b=document.getElementById('qsp-note-'+pid+'-'+(n+'').replace('.','_'));
+    if(b){var a=_matchPlayerStats[pid].rating===n;b.style.background=a?'var(--accent)':'var(--surface2)';b.style.color=a?'#fff':'var(--text)';b.style.fontWeight=a?'700':'400';b.style.borderColor=a?'var(--accent)':'var(--border)';}
+  });
+}
+
+function quickSub(outPid,inPid,slotIdx){
+  var minute=_quickSubMinute||60;
+  _matchSubs.push({out_player_id:outPid,in_player_id:inPid,minute:minute});
+  if(!_matchPlayerStats[inPid])_matchPlayerStats[inPid]={goals:0,assists:0,saves:0,yellow_card:false,red_card:false,rating:0};
+  _pitchSelectedSlot=null; _pitchSelectedPid=inPid;
+  var p=document.getElementById('quick-stat-popup'); if(p)p.remove();
+  refreshPitchStats(); saveMatchFormState(); saveMatchDraft();
+}
+
 function onPitchPlayerClick(origPid, activePid, slotIdx) {
   if (_pitchSubMode) {
     if (_pitchSubOutPid !== origPid) {
