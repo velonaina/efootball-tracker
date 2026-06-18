@@ -5701,7 +5701,11 @@ function renderMatchTabMain() {
     '</div>' +
     '<div class="match-score-team">' +
       '<div class="match-score-team-name">Adversaire</div>' +
-      '<input type="number" id="m-score-against" class="match-score-input" min="0" value="0" oninput="autoUpdateResult();saveMatchFormState()">' +
+      '<div style="display:flex;align-items:center;gap:4px">' +
+        '<button onclick="adjustScoreAgainst(-1)" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px;color:var(--text)">−</button>' +
+        '<input type="number" id="m-score-against" class="match-score-input" min="0" value="0" oninput="autoUpdateResult();saveMatchFormState()" style="width:60px;text-align:center">' +
+        '<button onclick="adjustScoreAgainst(1)" style="width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:16px;color:var(--text)">+</button>' +
+      '</div>' +
     '</div>' +
   '</div>';
 
@@ -7268,10 +7272,16 @@ function updateMatchStat(pid, stat, delta) {
       var node = document.querySelector('.match-pitch-node[data-slot="' + slotIdx2 + '"]');
       if (node) {
         var badgeCircle = node.querySelector('circle[fill="#a78bfa"]');
-        var badgeText = node.querySelector('text[fill="#fff"][font-size="7"]');
-        if (newCount > 0) {
-          if (badgeCircle) { badgeCircle.setAttribute('r', '6'); }
-          else {
+        var badgeText = node.querySelector('text[font-size="7"][fill="#fff"]');
+        if (newCount <= 0) {
+          // Masquer le badge
+          if (badgeCircle) badgeCircle.setAttribute('r', '0');
+          if (badgeText) badgeText.textContent = '';
+        } else {
+          if (badgeCircle) {
+            badgeCircle.setAttribute('r', '6');
+            if (badgeText) badgeText.textContent = newCount;
+          } else {
             // Recréer le badge
             var slots3 = _matchLastFormation ? buildPitchSlots(_matchLastFormation) : null;
             if (slots3 && slots3[slotIdx2]) {
@@ -7281,12 +7291,13 @@ function updateMatchStat(pid, stat, delta) {
               var c = document.createElementNS('http://www.w3.org/2000/svg','circle');
               c.setAttribute('cx', cxB+10); c.setAttribute('cy', cyB-10); c.setAttribute('r','6'); c.setAttribute('fill','#a78bfa');
               var t2 = document.createElementNS('http://www.w3.org/2000/svg','text');
-              t2.setAttribute('x', cxB+10); t2.setAttribute('y', cyB-7); t2.setAttribute('text-anchor','middle'); t2.setAttribute('font-size','7'); t2.setAttribute('font-weight','700'); t2.setAttribute('fill','#fff');
+              t2.setAttribute('x', cxB+10); t2.setAttribute('y', cyB-7);
+              t2.setAttribute('text-anchor','middle'); t2.setAttribute('font-size','7');
+              t2.setAttribute('font-weight','700'); t2.setAttribute('fill','#fff');
               t2.textContent = newCount;
               node.appendChild(c); node.appendChild(t2);
             }
           }
-          if (badgeText) badgeText.textContent = newCount;
         }
       }
     }
@@ -7345,6 +7356,15 @@ function selectResult(val) {
   document.querySelectorAll('.result-btn').forEach(b => {
     b.classList.toggle('active', b.dataset.val === val);
   });
+}
+
+function adjustScoreAgainst(delta) {
+  var el = document.getElementById('m-score-against');
+  if (!el) return;
+  el.value = Math.max(0, (parseInt(el.value) || 0) + delta);
+  autoUpdateResult();
+  saveMatchFormState();
+  saveMatchDraft();
 }
 
 function autoUpdateResult() {
