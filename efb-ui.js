@@ -5770,12 +5770,14 @@ function renderMatchTabMain() {
           '<select id="m-' + slot + '-target" class="form-input form-input-sm" onchange="saveLastInstructions()">' +
             '<option value="">Targeted Player</option>' +
             (function() {
-              var usedInPids = _matchSubs.map(function(s) { return s.in_player_id; });
-              var onPitch = _matchTitulaires.map(function(t) {
-                var sub = _matchSubs.find(function(s) { return s.out_player_id === t.player_id; });
-                return sub ? sub.in_player_id : t.player_id;
-              });
-              usedInPids.forEach(function(pid) { if (!onPitch.includes(pid)) onPitch.push(pid); });
+              // Seulement les joueurs actuellement sur le terrain (titulaires remplacés par entrants)
+              var onPitch = _matchTitulaires
+                .filter(function(t){ return t && t.player_id; })
+                .map(function(t) {
+                  var sub = _matchSubs.find(function(s) { return s.out_player_id === t.player_id; });
+                  return sub ? sub.in_player_id : t.player_id;
+                })
+                .filter(function(pid){ return !!pid; });
               return onPitch.map(function(pid) {
                 var p = State.players.find(function(x) { return x.id === pid; });
                 return p ? '<option value="' + p.id + '">' + p.name + '</option>' : '';
