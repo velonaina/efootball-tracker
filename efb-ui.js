@@ -23,10 +23,63 @@ const State = {
 };
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+// ── Backup / Restore localStorage ↔ Supabase ─────────────────────────────────
+var BACKUP_KEYS = [
+  'efb_squad_23',
+  'efb_ft_lineup',
+  'efb_last_lineup',
+  'efb_custom_formations',
+  'efb_active_coach',
+  'efb_last_instructions',
+  'efb_ft_ia_analysis',
+];
+
+async function backupLocalStorageToSupabase() {
+  try {
+    var data = {};
+    BACKUP_KEYS.forEach(function(key) {
+      var val = localStorage.getItem(key);
+      if (val) data[key] = val;
+    });
+    await AppState.set('localStorage_backup', JSON.stringify(data));
+    await AppState.set('localStorage_backup_date', new Date().toISOString());
+  } catch(e) {
+    console.warn('Backup localStorage échoué:', e.message);
+  }
+}
+
+async function restoreLocalStorageFromSupabase() {
+  try {
+    // Vérifier si les clés critiques sont vides
+    var squad = localStorage.getItem('efb_squad_23');
+    var lineup = localStorage.getItem('efb_ft_lineup');
+    if (squad && lineup) return; // localStorage OK, pas besoin de restaurer
+
+    var raw = await AppState.get('localStorage_backup');
+    if (!raw) return;
+    var data = JSON.parse(raw);
+    var restored = 0;
+    BACKUP_KEYS.forEach(function(key) {
+      if (data[key] && !localStorage.getItem(key)) {
+        localStorage.setItem(key, data[key]);
+        restored++;
+      }
+    });
+    if (restored > 0) {
+      showToast('✅ ' + restored + ' données restaurées depuis Supabase', 'success', 4000);
+    }
+  } catch(e) {
+    console.warn('Restauration localStorage échouée:', e.message);
+  }
+}
+
 async function init() {
   renderSkeleton();
   loadAllCustomFormations();
   try {
+    // Restaurer localStorage depuis Supabase si vide
+    await restoreLocalStorageFromSupabase();
+    loadAllCustomFormations(); // Recharger après restauration éventuelle
     State.players = await Players.getAll();
     State.matches = await Matches.getAll();
     State.coaches = await Coaches.getAll();
@@ -53,6 +106,8 @@ async function init() {
     render();
     // Vérifier si un brouillon de match existe
     setTimeout(checkMatchDraftOnLoad, 500);
+    // Backup localStorage → Supabase (différé pour ne pas bloquer le chargement)
+    setTimeout(function() { backupLocalStorageToSupabase(); startBackupInterval(); }, 3000);
   } catch (e) {
     showError('Erreur de connexion Supabase : ' + e.message);
   }
@@ -1653,26 +1708,38 @@ function renderEffectif() {
   `;
 }
 
+function getSortedPlayers() {
+  try {
+    var matches = State.matches ? filterStatsMatches(State.matches) : [];
+    var posOrder = {'GK':0,'CB':1,'LB':2,'RB':3,'DMF':4,'CMF':5,'LMF':6,'RMF':7,'AMF':8,'LWF':9,'RWF':10,'SS':11,'CF':12};
+    return State.players.slice().sort(function(a, b) {
+      function stats(p) {
+        var pm = matches.filter(function(m){ return m.player_stats && m.player_stats.some(function(ps){ return ps.player_id===p.id; }); });
+        var wr = pm.length>0 ? pm.filter(function(m){ return m.result==='V'; }).length/pm.length : -1;
+        var rats=[]; pm.forEach(function(m){ var ps=(m.player_stats||[]).find(function(ps){ return ps.player_id===p.id; }); if(ps&&ps.rating>0) rats.push(ps.rating); });
+        var ar = rats.length>0 ? rats.reduce(function(a,b){return a+b;},0)/rats.length : -1;
+        var card=(State.cards[p.id]||[])[0];
+        var pos=card&&card.efhub_stats?(card.efhub_stats.position||'ZZ'):'ZZ';
+        return {wr:wr, ar:ar, po:posOrder[pos]!==undefined?posOrder[pos]:99};
+      }
+      var sa=stats(a), sb=stats(b);
+      if(sa.wr!==sb.wr){ if(sa.wr===-1)return 1; if(sb.wr===-1)return -1; return sb.wr-sa.wr; }
+      if(sa.ar!==sb.ar){ if(sa.ar===-1)return 1; if(sb.ar===-1)return -1; return sb.ar-sa.ar; }
+      return sa.po-sb.po;
+    });
+  } catch(e) {
+    return State.players;
+  }
+}
+
 function renderSidebar() {
-  return `
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <span class="sidebar-label">Joueurs</span>
-        <button class="btn-icon" onclick="openModal('addPlayer')" title="Ajouter joueur">
-          <i class="ti ti-plus"></i>
-        </button>
-      </div>
-      <div class="sidebar-list">
-        ${State.players.map(p => renderPlayerItem(p)).join('')}
-        ${State.players.length === 0 ? `
-          <div class="sidebar-empty">
-            <p>Aucun joueur</p>
-            <button class="btn-sm btn-primary" onclick="openModal('addPlayer')">+ Ajouter</button>
-          </div>
-        ` : ''}
-      </div>
-    </aside>
-  `;
+  var sorted = getSortedPlayers();
+  var playersHtml = sorted.map(function(p){ try { return renderPlayerItem(p); } catch(e2) { return ''; } }).join('');
+  var emptyHtml = State.players.length === 0
+    ? '<div class="sidebar-empty"><p>Aucun joueur</p><button class="btn-sm btn-primary" onclick="openModal(' + String.fromCharCode(39) + 'addPlayer' + String.fromCharCode(39) + ')">+ Ajouter</button></div>'
+    : '';
+  var headerHtml = '<div class="sidebar-header"><span class="sidebar-label">Joueurs</span><button class="btn-icon" onclick="openModal(' + String.fromCharCode(39) + 'addPlayer' + String.fromCharCode(39) + ')" title="Ajouter joueur"><i class="ti ti-plus"></i></button></div>';
+  return '<aside class="sidebar">' + headerHtml + '<div class="sidebar-list">' + playersHtml + emptyHtml + '</div></aside>';
 }
 
 function renderPlayerItem(player) {
@@ -5429,6 +5496,12 @@ function closeFmEditor() {
 
 var MATCH_DRAFT_KEY = 'efb_match_draft';
 var _matchDraftInterval = null;
+var _backupInterval = null;
+
+function startBackupInterval() {
+  if (_backupInterval) clearInterval(_backupInterval);
+  _backupInterval = setInterval(backupLocalStorageToSupabase, 5 * 60 * 1000); // toutes les 5 min
+}
 var _matchRestoringDraft = false;
 
 function saveMatchDraft() {
@@ -8075,7 +8148,11 @@ function _renderMatchPlayerStatsListV2_OLD() {
 var _squad23 = []; // [{player_id, card_id, build_id}]
 
 function saveSquad23() {
-  try { localStorage.setItem(SQUAD_STORAGE_KEY, JSON.stringify(_squad23)); } catch(e) {}
+  try {
+    localStorage.setItem(SQUAD_STORAGE_KEY, JSON.stringify(_squad23));
+    // Backup différé pour ne pas bloquer
+    setTimeout(backupLocalStorageToSupabase, 500);
+  } catch(e) {}
 }
 
 function loadSquad23() {
