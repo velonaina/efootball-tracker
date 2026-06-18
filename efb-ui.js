@@ -7223,13 +7223,50 @@ function updateMatchStat(pid, stat, delta) {
   // Mettre à jour le popup rapide si ouvert pour ce joueur
   var qspEl = document.getElementById('qsp-' + stat + '-' + pid);
   if (qspEl) qspEl.textContent = _matchPlayerStats[pid][stat];
-  // Si le popup est ouvert pour un autre stat du même joueur, rafraîchir tous les compteurs
+  // Si le popup est ouvert pour ce joueur, rafraîchir tous les compteurs
   var popup = document.getElementById('quick-stat-popup');
   if (popup && popup._activePid === pid) {
     ['goals','assists','saves'].forEach(function(s) {
       var el2 = document.getElementById('qsp-' + s + '-' + pid);
       if (el2) el2.textContent = _matchPlayerStats[pid][s] || 0;
     });
+  }
+  // Mettre à jour le badge SVG sur le terrain (buts + passes)
+  if (stat === 'goals' || stat === 'assists') {
+    var st2 = _matchPlayerStats[pid];
+    var newCount = (st2.goals || 0) + (st2.assists || 0);
+    // Trouver le nœud SVG du joueur via data-slot
+    var slotIdx2 = _matchTitulaires.findIndex(function(t) {
+      if (!t) return false;
+      var sub = _matchSubs.find(function(s) { return s.out_player_id === t.player_id; });
+      return (sub ? sub.in_player_id : t.player_id) === pid || t.player_id === pid;
+    });
+    if (slotIdx2 >= 0) {
+      var node = document.querySelector('.match-pitch-node[data-slot="' + slotIdx2 + '"]');
+      if (node) {
+        var badgeCircle = node.querySelector('circle[fill="#a78bfa"]');
+        var badgeText = node.querySelector('text[fill="#fff"][font-size="7"]');
+        if (newCount > 0) {
+          if (badgeCircle) { badgeCircle.setAttribute('r', '6'); }
+          else {
+            // Recréer le badge
+            var slots3 = _matchLastFormation ? buildPitchSlots(_matchLastFormation) : null;
+            if (slots3 && slots3[slotIdx2]) {
+              var slot3 = slots3[slotIdx2];
+              var cxB = Math.round(slot3.left / 100 * 180);
+              var cyB = Math.round(slot3.top  / 100 * 290);
+              var c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+              c.setAttribute('cx', cxB+10); c.setAttribute('cy', cyB-10); c.setAttribute('r','6'); c.setAttribute('fill','#a78bfa');
+              var t2 = document.createElementNS('http://www.w3.org/2000/svg','text');
+              t2.setAttribute('x', cxB+10); t2.setAttribute('y', cyB-7); t2.setAttribute('text-anchor','middle'); t2.setAttribute('font-size','7'); t2.setAttribute('font-weight','700'); t2.setAttribute('fill','#fff');
+              t2.textContent = newCount;
+              node.appendChild(c); node.appendChild(t2);
+            }
+          }
+          if (badgeText) badgeText.textContent = newCount;
+        }
+      }
+    }
   }
   // Mettre à jour le score automatiquement quand un but est marqué
   if (stat === 'goals') {
