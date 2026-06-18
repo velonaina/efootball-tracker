@@ -7215,8 +7215,12 @@ function removeMatchPlayerStat(pid) {
 function updateMatchStat(pid, stat, delta) {
   if (!_matchPlayerStats[pid]) return;
   _matchPlayerStats[pid][stat] = Math.max(0, (_matchPlayerStats[pid][stat] || 0) + delta);
+  // Mettre à jour le tableau général
   const el = document.getElementById('mps-' + stat + '-' + pid);
   if (el) el.textContent = _matchPlayerStats[pid][stat];
+  // Mettre à jour le popup rapide si ouvert
+  var qspEl = document.getElementById('qsp-' + stat + '-' + pid);
+  if (qspEl) qspEl.textContent = _matchPlayerStats[pid][stat];
   // Mettre à jour le score automatiquement quand un but est marqué
   if (stat === 'goals') {
     var scoreEl = document.getElementById('m-score-for');
