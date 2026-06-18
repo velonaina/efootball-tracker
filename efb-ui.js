@@ -6112,12 +6112,35 @@ function openQuickStatPopup(outPid, activePid, slotIdx, cx, cy) {
 
   popup.innerHTML=h;
   document.body.appendChild(popup);
+
+  // Drag & drop sur le header
+  var header = popup.querySelector('div');
+  if (header) {
+    header.style.cursor = 'move';
+    var isDragging = false, dragStartX = 0, dragStartY = 0, popStartX = 0, popStartY = 0;
+    header.addEventListener('mousedown', function(e) {
+      if (e.target.tagName === 'BUTTON') return; // ne pas drag si clic sur bouton
+      isDragging = true;
+      dragStartX = e.clientX; dragStartY = e.clientY;
+      popStartX = parseInt(popup.style.left) || popup.getBoundingClientRect().left;
+      popStartY = parseInt(popup.style.top) || popup.getBoundingClientRect().top;
+      popup.style.transform = '';
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', function(e) {
+      if (!isDragging) return;
+      popup.style.left = (popStartX + e.clientX - dragStartX) + 'px';
+      popup.style.top  = (popStartY + e.clientY - dragStartY) + 'px';
+    });
+    document.addEventListener('mouseup', function() { isDragging = false; });
+  }
+
   setTimeout(function(){
     document.addEventListener('mousedown',function cp(e){
       var p=document.getElementById('quick-stat-popup');
       if(p&&!p.contains(e.target)){p.remove();document.removeEventListener('mousedown',cp);}
     });
-  },100);
+  },200);
 }
 
 var _quickSubMinute=60;
