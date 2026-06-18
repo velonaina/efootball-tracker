@@ -1710,24 +1710,34 @@ function renderEffectif() {
 
 function getSortedPlayers() {
   try {
-    var matches = State.matches ? filterStatsMatches(State.matches) : [];
+    var allMatches = State.matches ? filterStatsMatches(State.matches) : [];
     var posOrder = {'GK':0,'CB':1,'LB':2,'RB':3,'DMF':4,'CMF':5,'LMF':6,'RMF':7,'AMF':8,'LWF':9,'RWF':10,'SS':11,'CF':12};
     return State.players.slice().sort(function(a, b) {
-      function stats(p) {
-        var pm = matches.filter(function(m){ return m.player_stats && m.player_stats.some(function(ps){ return ps.player_id===p.id; }); });
-        var wr = pm.length>0 ? pm.filter(function(m){ return m.result==='V'; }).length/pm.length : -1;
-        var rats=[]; pm.forEach(function(m){ var ps=(m.player_stats||[]).find(function(ps){ return ps.player_id===p.id; }); if(ps&&ps.rating>0) rats.push(ps.rating); });
-        var ar = rats.length>0 ? rats.reduce(function(a,b){return a+b;},0)/rats.length : -1;
-        var card=(State.cards[p.id]||[])[0];
-        var pos=card&&card.efhub_stats?(card.efhub_stats.position||'ZZ'):'ZZ';
-        return {wr:wr, ar:ar, po:posOrder[pos]!==undefined?posOrder[pos]:99};
+      function getPlayerStats(player) {
+        var pid = player.id;
+        var pm = allMatches.filter(function(m){
+          return m.player_stats && m.player_stats.some(function(pstat){ return pstat.player_id === pid; });
+        });
+        var wins = pm.filter(function(m){ return m.result === 'V'; }).length;
+        var winRate = pm.length > 0 ? wins / pm.length : -1;
+        var rats = [];
+        pm.forEach(function(m){
+          var pstat = (m.player_stats||[]).find(function(pst){ return pst.player_id === pid; });
+          if (pstat && pstat.rating > 0) rats.push(pstat.rating);
+        });
+        var avgRating = rats.length > 0 ? rats.reduce(function(x,y){ return x+y; }, 0) / rats.length : -1;
+        var card = (State.cards[pid]||[])[0];
+        var pos = card && card.efhub_stats ? (card.efhub_stats.position || 'ZZ') : 'ZZ';
+        return { wr: winRate, ar: avgRating, po: posOrder[pos] !== undefined ? posOrder[pos] : 99 };
       }
-      var sa=stats(a), sb=stats(b);
-      if(sa.wr!==sb.wr){ if(sa.wr===-1)return 1; if(sb.wr===-1)return -1; return sb.wr-sa.wr; }
-      if(sa.ar!==sb.ar){ if(sa.ar===-1)return 1; if(sb.ar===-1)return -1; return sb.ar-sa.ar; }
-      return sa.po-sb.po;
+      var sa = getPlayerStats(a);
+      var sb = getPlayerStats(b);
+      if (sa.wr !== sb.wr) { if (sa.wr === -1) return 1; if (sb.wr === -1) return -1; return sb.wr - sa.wr; }
+      if (sa.ar !== sb.ar) { if (sa.ar === -1) return 1; if (sb.ar === -1) return -1; return sb.ar - sa.ar; }
+      return sa.po - sb.po;
     });
   } catch(e) {
+    console.error('getSortedPlayers error:', e);
     return State.players;
   }
 }
