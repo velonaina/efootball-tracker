@@ -954,6 +954,18 @@ function renderFtPitchSVG(slots) {
     var halo = swapMode && hasPlayer ? '<circle cx=\"' + cx + '\" cy=\"' + cy + '\" r=\"18\" fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"1\" stroke-dasharray=\"3,2\" opacity=\"0.5\"/>' : '';
     var posLabel = titu.position_label || slot.label;
 
+    // Stats de performance du joueur à ce slot
+    var slotWinRate = '';
+    if (titu.player_id) {
+      var slotMatches = filterStatsMatches(State.matches || []).filter(function(m){
+        return m.player_stats && m.player_stats.some(function(ps){ return ps.player_id === titu.player_id; });
+      });
+      if (slotMatches.length >= 3) {
+        var slotWins = slotMatches.filter(function(m){ return m.result === 'V'; }).length;
+        slotWinRate = Math.round(slotWins / slotMatches.length * 100) + '%';
+      }
+    }
+
     // Tooltip build au survol
     var tooltipBuildName = '';
     if (titu.build_id && titu.card_id) {
@@ -969,7 +981,7 @@ function renderFtPitchSVG(slots) {
       (isSelected ? '<circle cx=\"' + cx + '\" cy=\"' + cy + '\" r=\"19\" fill=\"none\" stroke=\"#f59e0b\" stroke-width=\"1.5\" opacity=\"0.6\"/>' : '') +
       '<text x=\"' + cx + '\" y=\"' + (cy+3) + '\" text-anchor=\"middle\" font-size=\"8\" font-weight=\"700\" fill=\"#fff\">' + posLabel + '</text>' +
       '<text x=\"' + cx + '\" y=\"' + (cy+24) + '\" text-anchor=\"middle\" font-size=\"7.5\" fill=\"' + (isSelected ? '#f59e0b' : '#e2e8f0') + '\" font-weight=\"' + (isSelected ? '700' : '500') + '\">' + name + '</text>' +
-
+      (slotWinRate ? '<text x=\"' + cx + '\" y=\"' + (cy+33) + '\" text-anchor=\"middle\" font-size=\"6.5\" fill=\"#34d399\">' + slotWinRate + '</text>' : '') +
     '</g>';
   }).join('');
 
@@ -1743,7 +1755,7 @@ function getSortedPlayers() {
 }
 
 function renderSidebar() {
-  var sorted = getSortedPlayers();
+  var sorted = State.players.slice().sort(function(a,b){ return a.name.localeCompare(b.name); });
   var playersHtml = sorted.map(function(p){ try { return renderPlayerItem(p); } catch(e2) { return ''; } }).join('');
   var emptyHtml = State.players.length === 0
     ? '<div class="sidebar-empty"><p>Aucun joueur</p><button class="btn-sm btn-primary" onclick="openModal(' + String.fromCharCode(39) + 'addPlayer' + String.fromCharCode(39) + ')">+ Ajouter</button></div>'
@@ -1771,7 +1783,22 @@ function renderPlayerItem(player) {
         <span class="player-name">${player.name}</span>
         <span class="player-meta">${card ? (card.playing_style || card.card_type || '—') : 'Aucune carte'}</span>
       </div>
-      ${card ? `<span class="ovr-badge ${card.card_type === 'Trending' ? 'trending' : card.card_type === 'Epic' ? 'epic' : card.card_type === 'Iconic' ? 'iconic' : ''}">${card.card_type || '—'}</span>` : ''}
+      ${(function() {
+        // Indicateur de forme : 5 derniers matchs du joueur
+        var pid = player.id;
+        var pm = filterStatsMatches(State.matches || []).filter(function(m){
+          return m.player_stats && m.player_stats.some(function(ps){ return ps.player_id === pid; });
+        }).slice(-5);
+        if (pm.length === 0) return card ? '<span class="ovr-badge ' + (card.card_type === 'Trending' ? 'trending' : card.card_type === 'Epic' ? 'epic' : card.card_type === 'Iconic' ? 'iconic' : '') + '">' + (card.card_type || '—') + '</span>' : '';
+        var dots = pm.map(function(m){
+          var color = m.result === 'V' ? '#34d399' : m.result === 'N' ? '#f59e0b' : '#ef4444';
+          return '<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + color + ';margin:0 1px"></span>';
+        }).join('');
+        return '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">' +
+          (card ? '<span class="ovr-badge ' + (card.card_type === 'Trending' ? 'trending' : card.card_type === 'Epic' ? 'epic' : card.card_type === 'Iconic' ? 'iconic' : '') + '">' + (card.card_type || '—') + '</span>' : '') +
+          '<div style="display:flex;align-items:center">' + dots + '</div>' +
+          '</div>';
+      })()}
     </div>
   `;
 }
@@ -1809,6 +1836,24 @@ function renderPlayerHeader(player, card, imgUrl) {
       <div class="player-header-info">
         <div class="player-header-top">
           <h2 class="player-header-name">${player.name}</h2>
+          ${(function() {
+            // Build recommandé = build avec le meilleur score V/N/D (min 3 matchs)
+            var bestBuild = null; var bestScore = -1;
+            var allCards = State.cards[player.id] || [];
+            allCards.forEach(function(c) {
+              (State.builds[c.id] || []).forEach(function(b) {
+                var bm = filterStatsMatches(State.matches || []).filter(function(m){
+                  return m.player_stats && m.player_stats.some(function(ps){ return ps.build_id === b.id; });
+                });
+                if (bm.length < 3) return;
+                var wins = bm.filter(function(m){ return m.result==='V'; }).length;
+                var wr = wins / bm.length;
+                if (wr > bestScore) { bestScore = wr; bestBuild = b; }
+              });
+            });
+            if (!bestBuild) return '';
+            return '<span style="font-size:10px;background:rgba(52,211,153,0.15);color:#34d399;border:1px solid rgba(52,211,153,0.3);border-radius:4px;padding:2px 6px;margin-left:8px" title="Build avec le meilleur win rate (min 3 matchs)">✅ ' + bestBuild.name + ' (' + Math.round(bestScore*100) + '%V)</span>';
+          })()}
           <div class="player-header-actions">
             <button class="btn-icon" onclick="openModal('editPlayer','${player.id}')" title="Modifier">
               <i class="ti ti-pencil"></i>
@@ -2638,6 +2683,54 @@ function renderBuildCard(build, card) {
   const pos = card.efhub_stats?.position || '';
   const isGK = pos === 'GK';
 
+  // ── Score V/N/D avec bonus/malus et fiabilité ──
+  function calcBuildScore(matches, avgRating, csRate, goalsPerMatch, assistsPerMatch) {
+    if (matches.length === 0) return null;
+
+    // Base V/N/D
+    let pts = 0;
+    matches.forEach(m => {
+      if (m.result === 'V') pts += 3;
+      else if (m.result === 'N') pts += 1;
+    });
+
+    // Malus note < 6
+    bRatings.forEach(r => { if (r < 6) pts -= 0.5; });
+
+    // Bonus buts + passes (max 1pt/match)
+    const gpm = goalsPerMatch || 0;
+    const apm = assistsPerMatch || 0;
+    pts += Math.min(gpm * 0.5 + apm * 0.3, matches.length) ;
+
+    // Bonus CS
+    pts += (csRate / 100) * matches.length * 0.5;
+
+    // Score brut sur 100
+    const maxPts = matches.length * 3;
+    const rawScore = maxPts > 0 ? (pts / maxPts) * 100 : 0;
+
+    // Fiabilité
+    let reliability = 1;
+    if (matches.length < 3) reliability = 0.4;
+    else if (matches.length < 10) reliability = 0.7;
+    else if (matches.length < 20) reliability = 0.9;
+
+    const finalScore = Math.min(100, Math.max(0, rawScore * reliability));
+
+    // Étoiles sur 5
+    let stars = 1;
+    if (finalScore >= 80) stars = 5;
+    else if (finalScore >= 60) stars = 4;
+    else if (finalScore >= 40) stars = 3;
+    else if (finalScore >= 20) stars = 2;
+
+    return { score: Math.round(finalScore), stars, reliable: matches.length >= 3 };
+  }
+
+  const bGoalsPerMatch = buildMatches.length > 0 ? bGoals / buildMatches.length : 0;
+  const bAssistsPerMatch = buildMatches.length > 0 ? bAssists / buildMatches.length : 0;
+  const buildScore = calcBuildScore(buildMatches, parseFloat(bAvgRating), bCSRate, bGoalsPerMatch, bAssistsPerMatch);
+
   const expandId = 'build-expand-' + build.id;
   const player = State.players.find(p => p.id === State.selectedPlayerId);
   const efhubId = player ? Efhub.parseId(player.efhub_url || '') : null;
@@ -2703,6 +2796,9 @@ function renderBuildCard(build, card) {
             <span class="build-perf-item">🛡️ ${bCSRate}% CS</span>
           `}
           <span class="build-perf-item serie">Série: ${serie.current}</span>
+          ${buildScore ? `<span class="build-perf-item" style="margin-left:auto;font-weight:700;color:${buildScore.stars >= 4 ? '#34d399' : buildScore.stars === 3 ? '#f59e0b' : '#ef4444'}" title="Score V/N/D: ${buildScore.score}/100${buildScore.reliable ? '' : ' (données insuffisantes)'}">
+            ${'⭐'.repeat(buildScore.stars)} ${buildScore.score}
+          </span>` : ''}
         </div>
       ` : ''}
 
