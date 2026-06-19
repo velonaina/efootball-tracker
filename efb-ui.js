@@ -2613,9 +2613,12 @@ function renderBuildsTab(card) {
   const builds = State.builds[card.id] || [];
   const isTrending = card.card_type === 'Trending';
 
-  // Vérifier si le joueur est déjà dans la sélection
+  // Vérifier si le joueur est déjà dans la sélection (par player_id pour éviter doublons toutes cartes)
   loadSquad23();
-  const inSquad = _squad23.some(function(s) { return s.card_id === card.id; });
+  const inSquadByPlayer = _squad23.some(function(s) { return s.player_id === card.player_id; });
+  const inSquadByCard   = _squad23.some(function(s) { return s.card_id   === card.id; });
+  const inSquad = inSquadByCard; // carte exacte déjà sélectionnée
+  const inSquadOther = inSquadByPlayer && !inSquadByCard; // autre carte du même joueur
 
   if (isTrending) {
     return `
@@ -2626,8 +2629,8 @@ function renderBuildsTab(card) {
             <span style="font-size:12px;color:var(--muted)">Carte figée — pas de build possible</span>
           </div>
           <button class="btn-sm ${inSquad ? 'btn-ghost' : 'btn-primary'}" onclick="addTrendingToSquad23('${card.id}')" ${inSquad ? 'disabled' : ''}>
-            <i class="ti ti-user-${inSquad ? 'check' : 'plus'}"></i>
-            ${inSquad ? 'Dans la sélection' : 'Ajouter à la sélection'}
+            <i class="ti ti-user-${inSquad ? 'check' : (inSquadOther ? 'switch-3' : 'plus')}"></i>
+            ${inSquad ? 'Dans la sélection' : (inSquadOther ? 'Remplacer la carte' : 'Ajouter à la sélection')}
           </button>
         </div>
         <div class="empty-state" style="padding:20px 0">
@@ -2646,13 +2649,13 @@ function renderBuildsTab(card) {
       </div>
       ${builds.length === 0
         ? `<div class="empty-state"><p>Aucun build créé</p></div>`
-        : builds.map(b => renderBuildCard(b, card)).join('')
+        : builds.map(b => renderBuildCard(b, card, inSquadOther)).join('')
       }
     </div>
   `;
 }
 
-function renderBuildCard(build, card) {
+function renderBuildCard(build, card, inSquadOther) {
   const active = build.id === State.selectedBuildId;
   const sliders = build.sliders || {};
   const pointsUsed = Progression.totalPoints(sliders);
@@ -2747,8 +2750,8 @@ function renderBuildCard(build, card) {
           <span class="build-pts ${pointsUsed === pointsMax ? 'full' : ''}">${pointsUsed} / ${pointsMax} pts</span>
         </div>
         <div class="build-card-actions">
-          <button class="btn-icon" onclick="addBuildToSquad23('${build.id}');event.stopPropagation()" title="Ajouter à la sélection">
-            <i class="ti ti-user-plus" id="squad-btn-${build.id}"></i>
+          <button class="btn-icon" onclick="addBuildToSquad23('${build.id}');event.stopPropagation()" title="${inSquadOther ? 'Remplacer la carte active' : 'Ajouter à la sélection'}">
+            <i class="ti ti-user-${inSquadOther ? 'switch-3' : 'plus'}" id="squad-btn-${build.id}"></i>
           </button>
           <button class="btn-icon" onclick="openBuildCompare('${build.id}');event.stopPropagation()" title="Comparer">
             <i class="ti ti-arrows-diff"></i>
@@ -8365,7 +8368,8 @@ function addBuildToSquad23(buildId) {
   // Vérifier si le joueur est déjà dans la Squad 23
   var existing = _squad23.find(function(s) { return s.player_id === pid; });
   if (existing) {
-    // Mettre à jour le build actif
+    // Mettre à jour la carte ET le build actif
+    existing.card_id = card.id;
     existing.build_id = buildId;
     saveSquad23();
     // Feedback visuel
