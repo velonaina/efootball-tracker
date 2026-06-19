@@ -8294,9 +8294,15 @@ function renderSquad23Section() {
   if (_squad23.length > 0) html += '<button class="btn-sm btn-ghost" onclick="clearSquad23()">Effacer tout</button>';
   html += '</div>';
 
-  // Liste des 23 sélectionnés
+  // Liste des 23 sélectionnés — triée par ordre alphabétique
+  var squad23Sorted = _squad23.slice().sort(function(a, b) {
+    var pa = State.players.find(function(x){ return x.id === a.player_id; });
+    var pb = State.players.find(function(x){ return x.id === b.player_id; });
+    var na = pa ? pa.name : ''; var nb = pb ? pb.name : '';
+    return na.localeCompare(nb);
+  });
   html += '<div class="squad23-list">';
-  _squad23.forEach(function(sel, i) {
+  squad23Sorted.forEach(function(sel, i) {
     var p = State.players.find(function(x) { return x.id === sel.player_id; });
     var cards = State.cards[sel.player_id] || [];
     var card = cards.find(function(c) { return c.id === sel.card_id; }) || cards[0];
@@ -8316,7 +8322,7 @@ function renderSquad23Section() {
       html += '<option value="' + b.id + '"' + (sel.build_id === b.id ? ' selected' : '') + '>' + b.name + '</option>';
     });
     html += '</select>';
-    html += '<button class="btn-icon danger" onclick="removeFromSquad23(' + i + ')"><i class="ti ti-x"></i></button>';
+    html += '<button class="btn-icon danger" onclick="removeFromSquad23By(' + String.fromCharCode(39) + sel.player_id + String.fromCharCode(39) + ')"><i class="ti ti-x"></i></button>';
     html += '</div>';
   });
 
@@ -8471,6 +8477,11 @@ function syncNewPlayerToLineups(entry) {
     lineup.remplacants = _matchRemplacants;
     localStorage.setItem(LINEUP_STORAGE_KEY, JSON.stringify(lineup));
   } catch(e) {}
+}
+
+function removeFromSquad23By(pid) {
+  var idx = _squad23.findIndex(function(s){ return s.player_id === pid; });
+  if (idx >= 0) removeFromSquad23(idx);
 }
 
 function removeFromSquad23(idx) {
