@@ -1346,7 +1346,8 @@ function ftSaveAndApply() {
 }
 
 function ftRefresh() {
-  if (State.activeTab !== 'formation') return;
+  // Permettre le refresh aussi depuis le modal match onglet Formation
+  if (State.activeTab !== 'formation' && _matchActiveTab !== 'formation') return;
   var pitchCol = document.querySelector('.ft-pitch-col');
   var slots = _ftFormation ? buildPitchSlots(_ftFormation) : null;
   var hasPitch = !!(slots && slots.length === 11);
@@ -5742,7 +5743,7 @@ function renderModalAddMatch(buildId) {
   var nowTime = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
   var q = String.fromCharCode(39);
 
-  var tabs = [{ id:'match', label:'Match' }, { id:'resume', label:'Résumé' }];
+  var tabs = [{ id:'match', label:'Match' }, { id:'formation', label:'Formation' }, { id:'resume', label:'Résumé' }];
   var tabNav = '<div class="match-modal-tabs">' +
     tabs.map(function(t) {
       return '<button class="match-modal-tab' + (_matchActiveTab === t.id ? ' active' : '') + '" onclick="switchMatchTab(' + q + t.id + q + ')">' + t.label + '</button>';
@@ -5772,9 +5773,18 @@ function renderModalAddMatch(buildId) {
 var _matchLastFormation = '';
 
 function renderMatchTabContent() {
-  if (_matchActiveTab === 'match')  return renderMatchTabMain();
-  if (_matchActiveTab === 'resume') return renderMatchTabResume();
+  if (_matchActiveTab === 'match')     return renderMatchTabMain();
+  if (_matchActiveTab === 'formation') return renderMatchTabFormation();
+  if (_matchActiveTab === 'resume')    return renderMatchTabResume();
   return '';
+}
+
+function renderMatchTabFormation() {
+  // Synchroniser la formation du match avec l'onglet Formation
+  ftLoad();
+  return '<div style="padding:12px;height:100%;overflow-y:auto">' +
+    renderFormationTab() +
+  '</div>';
 }
 
 var _matchFormState = {};
@@ -5840,6 +5850,15 @@ function switchMatchTab(tab) {
   // Sauvegarder l'état avant de changer d'onglet
   if (_matchActiveTab === 'match') saveMatchFormState();
   if (_matchActiveTab === 'resume') saveMatchSummaryState();
+  if (_matchActiveTab === 'formation') {
+    // Sync formation vers le champ formation du match
+    if (_ftFormation) {
+      _matchLastFormation = _ftFormation;
+      var fmEl = document.getElementById('m-formation');
+      if (fmEl) { fmEl.value = _ftFormation; onFormationInput(_ftFormation); }
+      saveMatchFormState();
+    }
+  }
   _matchActiveTab = tab;
   var el = document.getElementById('match-tab-content');
   if (el) el.innerHTML = renderMatchTabContent();
@@ -6290,6 +6309,8 @@ function openQuickStatPopup(outPid, activePid, slotIdx, cx, cy) {
 
   if(!isSub){
     h+='<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px">';
+    // Bouton changer titulaire
+    h+='<button onclick="openSwapPlayerPicker('+slotIdx+',this);document.getElementById('+q+'quick-stat-popup'+q+').remove()" style="width:100%;padding:5px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;font-size:11px;margin-bottom:6px;display:flex;align-items:center;gap:6px"><i class="ti ti-switch-3"></i> Changer le titulaire</button>';
     h+='<div style="font-size:10px;color:var(--muted);margin-bottom:4px">🔄 Remplacer par</div>';
     if(rempsSorted.length===0){
       h+='<div style="font-size:11px;color:var(--muted)">Aucun remplaçant disponible</div>';
@@ -6638,9 +6659,7 @@ function renderPitchPlayerCard(pid, isSub, subMinute) {
   if (canReplace) {
     html += '<button class="btn-sm btn-ghost ppc-sub-btn" onclick="startPitchSubMode(' + q + pid + q + ')"><i class="ti ti-replace"></i> Remplacer</button>';
   }
-  if (!isSub && slotIdx >= 0) {
-    html += '<button class="btn-sm btn-ghost ppc-sub-btn" onclick="openSwapPlayerPicker(' + slotIdx + ',this)" title="Changer ce joueur" style="font-size:10px"><i class="ti ti-switch-3"></i></button>';
-  }
+
   if (alreadySub) {
     html += '<button class="btn-sm btn-ghost ppc-sub-btn" style="color:var(--red)" onclick="cancelSub(' + q + pid + q + ')"><i class="ti ti-x"></i> Annuler</button>';
   }
