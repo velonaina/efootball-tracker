@@ -2615,7 +2615,12 @@ function renderBuildsTab(card) {
 
   // Vérifier si le joueur est déjà dans la sélection (par player_id pour éviter doublons toutes cartes)
   loadSquad23();
-  const inSquadByPlayer = _squad23.some(function(s) { return s.player_id === card.player_id; });
+  var _cardPlayerName = (State.players.find(function(p){ return p.id === card.player_id; }) || {}).name || '';
+  const inSquadByPlayer = _squad23.some(function(s) {
+    if (s.player_id === card.player_id) return true;
+    var sp = State.players.find(function(p){ return p.id === s.player_id; });
+    return sp && sp.name.toLowerCase().trim() === _cardPlayerName.toLowerCase().trim();
+  });
   const inSquadByCard   = _squad23.some(function(s) { return s.card_id   === card.id; });
   const inSquad = inSquadByCard; // carte exacte déjà sélectionnée
   const inSquadOther = inSquadByPlayer && !inSquadByCard; // autre carte du même joueur
@@ -2750,9 +2755,23 @@ function renderBuildCard(build, card, inSquadOther) {
           <span class="build-pts ${pointsUsed === pointsMax ? 'full' : ''}">${pointsUsed} / ${pointsMax} pts</span>
         </div>
         <div class="build-card-actions">
-          <button class="btn-icon" onclick="addBuildToSquad23('${build.id}');event.stopPropagation()" title="${inSquadOther ? 'Remplacer la carte active' : 'Ajouter à la sélection'}">
-            <i class="ti ti-user-${inSquadOther ? 'switch-3' : 'plus'}" id="squad-btn-${build.id}"></i>
-          </button>
+          ${(function() {
+            loadSquad23();
+            var inThisCard = _squad23.some(function(s){ return s.card_id === card.id && s.build_id === build.id; });
+            var _bpName = (State.players.find(function(p){ return p.id === card.player_id; }) || {}).name || '';
+            var inThisPlayer = _squad23.some(function(s){
+              if (s.player_id === card.player_id) return true;
+              var sp = State.players.find(function(p){ return p.id === s.player_id; });
+              return sp && sp.name.toLowerCase().trim() === _bpName.toLowerCase().trim();
+            });
+            if (inThisCard) {
+              return '<button class="btn-icon btn-ghost" disabled title="Build actif dans la sélection"><i class="ti ti-user-check" id="squad-btn-' + build.id + '"></i></button>';
+            } else if (inThisPlayer) {
+              return '<button class="btn-icon" onclick="addBuildToSquad23(' + String.fromCharCode(39) + build.id + String.fromCharCode(39) + ');event.stopPropagation()" title="Remplacer le build actif"><i class="ti ti-user-switch-3" id="squad-btn-' + build.id + '"></i></button>';
+            } else {
+              return '<button class="btn-icon" onclick="addBuildToSquad23(' + String.fromCharCode(39) + build.id + String.fromCharCode(39) + ');event.stopPropagation()" title="Ajouter à la sélection"><i class="ti ti-user-plus" id="squad-btn-' + build.id + '"></i></button>';
+            }
+          })()}
           <button class="btn-icon" onclick="openBuildCompare('${build.id}');event.stopPropagation()" title="Comparer">
             <i class="ti ti-arrows-diff"></i>
           </button>
@@ -8272,12 +8291,15 @@ function loadSquad23() {
     var allPids = State.players.map(function(p) { return p.id; });
     var allCids = Object.values(State.cards).flat().map(function(c) { return c.id; });
     var allBids = Object.values(State.builds).flat().map(function(b) { return b.id; });
-    _squad23 = data.filter(function(s) {
-      return allPids.includes(s.player_id) && allCids.includes(s.card_id);
-    }).map(function(s) {
-      // Si le build n'existe plus, mettre null
-      return { player_id: s.player_id, card_id: s.card_id, build_id: allBids.includes(s.build_id) ? s.build_id : null };
+    // Dédupliquer par NOM du joueur — un seul par nom (même joueur, cartes différentes)
+    var seenNames = {};
+    data.forEach(function(s) {
+      if (!allPids.includes(s.player_id) || !allCids.includes(s.card_id)) return;
+      var player = State.players.find(function(p){ return p.id === s.player_id; });
+      var name = player ? player.name.toLowerCase().trim() : s.player_id;
+      seenNames[name] = { player_id: s.player_id, card_id: s.card_id, build_id: allBids.includes(s.build_id) ? s.build_id : null };
     });
+    _squad23 = Object.values(seenNames);
   } catch(e) {}
 }
 
@@ -8348,8 +8370,21 @@ function addTrendingToSquad23(cardId) {
   if (!card) return;
   var pid = card.player_id;
 
-  // Vérifier si déjà dans la Squad 23
-  if (_squad23.find(function(s) { return s.player_id === pid; })) return;
+  // Vérifier si déjà dans la Squad 23 (par player_id OU par nom)
+  var tName = (State.players.find(function(p){ return p.id === pid; }) || {}).name || '';
+  var tExisting = _squad23.find(function(s) {
+    if (s.player_id === pid) return true;
+    var sp = State.players.find(function(p){ return p.id === s.player_id; });
+    return sp && sp.name.toLowerCase().trim() === tName.toLowerCase().trim();
+  });
+  if (tExisting) {
+    tExisting.player_id = pid;
+    tExisting.card_id = cardId;
+    saveSquad23();
+    var el = document.getElementById('squad23-container');
+    if (el) el.innerHTML = renderSquad23Section();
+    return;
+  }
 
   if (_squad23.length >= 23) {
     showToast('Sélection complète (23 joueurs)', 'warning');
@@ -8371,10 +8406,16 @@ function addBuildToSquad23(buildId) {
   if (!card) return;
   var pid = card.player_id;
 
-  // Vérifier si le joueur est déjà dans la Squad 23
-  var existing = _squad23.find(function(s) { return s.player_id === pid; });
+  // Vérifier si le joueur est déjà dans la Squad 23 (par player_id OU par nom)
+  var playerName = (State.players.find(function(p){ return p.id === pid; }) || {}).name || '';
+  var existing = _squad23.find(function(s) {
+    if (s.player_id === pid) return true;
+    var sp = State.players.find(function(p){ return p.id === s.player_id; });
+    return sp && sp.name.toLowerCase().trim() === playerName.toLowerCase().trim();
+  });
   if (existing) {
     // Mettre à jour la carte ET le build actif
+    existing.player_id = pid;
     existing.card_id = card.id;
     existing.build_id = buildId;
     saveSquad23();
