@@ -2764,13 +2764,12 @@ function renderBuildCard(build, card, inSquadOther) {
               var sp = State.players.find(function(p){ return p.id === s.player_id; });
               return sp && sp.name.toLowerCase().trim() === _bpName.toLowerCase().trim();
             });
-            if (inThisCard) {
-              return '<button class="btn-icon btn-ghost" disabled title="Build actif dans la sélection"><i class="ti ti-user-check" id="squad-btn-' + build.id + '"></i></button>';
-            } else if (inThisPlayer) {
-              return '<button class="btn-icon" onclick="addBuildToSquad23(' + String.fromCharCode(39) + build.id + String.fromCharCode(39) + ');event.stopPropagation()" title="Remplacer le build actif"><i class="ti ti-user-switch-3" id="squad-btn-' + build.id + '"></i></button>';
-            } else {
-              return '<button class="btn-icon" onclick="addBuildToSquad23(' + String.fromCharCode(39) + build.id + String.fromCharCode(39) + ');event.stopPropagation()" title="Ajouter à la sélection"><i class="ti ti-user-plus" id="squad-btn-' + build.id + '"></i></button>';
-            }
+            // Toujours afficher le bouton — désactivé seulement si ce build exact est actif
+            var icon = inThisCard ? 'user-check' : (inThisPlayer ? 'user-switch-3' : 'user-plus');
+            var title = inThisCard ? 'Build actif dans la sélection' : (inThisPlayer ? 'Remplacer le build/carte actif' : 'Ajouter à la sélection');
+            var disabled = inThisCard ? 'disabled' : '';
+            var cls = inThisCard ? 'btn-icon btn-ghost' : 'btn-icon';
+            return '<button class="' + cls + '" onclick="addBuildToSquad23(' + String.fromCharCode(39) + build.id + String.fromCharCode(39) + ');event.stopPropagation()" title="' + title + '" ' + disabled + '><i class="ti ti-' + icon + '" id="squad-btn-' + build.id + '"></i></button>';
           })()}
           <button class="btn-icon" onclick="openBuildCompare('${build.id}');event.stopPropagation()" title="Comparer">
             <i class="ti ti-arrows-diff"></i>
